@@ -1,5 +1,0 @@
-admin1 → contraseña: Hola_12345678
-
-tecnico1 → contraseña: TecniC0_123
-
-usuario1 → contraseña: Usuari0_123
