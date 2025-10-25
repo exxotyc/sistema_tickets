@@ -1,0 +1,153 @@
+{% extends "tickets/base.html" %}
+{% block title %}Roles · Mantenedor{% endblock %}
+
+{% block extra_head %}
+<style>
+  .card-callout{border-left:4px solid #dc3545;background:#fff}
+  .role-grid{display:flex;gap:1rem;flex-wrap:wrap}
+  .role-grid .form-check{min-width:110px}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm">
+  <div class="card-body p-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h5 class="m-0"><i class="bi bi-people-gear me-2"></i>Asignación de roles</h5>
+      <a href="{% url 'maint_index' %}" class="btn btn-outline-secondary btn-sm">Volver</a>
+    </div>
+
+    <div class="card card-callout mb-3">
+      <div class="card-body py-3">
+        <ul class="m-0 ps-3 small">
+          <li>No dejes el sistema sin al menos <strong>un admin</strong>.</li>
+          <li><strong>Admin</strong> y <strong>Técnico</strong> son excluyentes.</li>
+          <li><strong>Usuario</strong> es opcional y puede coexistir.</li>
+        </ul>
+      </div>
+    </div>
+
+    <form id="roleForm" class="row g-3">
+      <div class="col-12 col-md-6">
+        <label class="form-label">Usuario</label>
+        <select id="userSelect" class="form-select" required>
+          <option value="" selected disabled>Selecciona usuario…</option>
+          {% for u in users %}
+            <option value="{{ u.id }}">{{ u.username }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-12 col-md-6">
+        <label class="form-label">Roles</label>
+        <div class="role-grid">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="r_admin" value="admin">
+            <label class="form-check-label" for="r_admin">Admin</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="r_tecnico" value="tecnico">
+            <label class="form-check-label" for="r_tecnico">Técnico</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="r_usuario" value="usuario">
+            <label class="form-check-label" for="r_usuario">Usuario</label>
+          </div>
+        </div>
+        <div class="form-text">Admin y Técnico no pueden coexistir.</div>
+      </div>
+
+      <div class="col-12">
+        <button id="btnSave" type="submit" class="btn btn-primary btn-ripple">
+          <i class="bi bi-save me-1"></i>Guardar
+        </button>
+        <span id="msg" class="ms-2 small text-muted"></span>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# Embed seguro de roles sin json_script: JSON en data-attribute #}
+<div id="rolesMapSrc" data-rolesmap='{{ roles_map|escapejs }}' hidden></div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener("DOMContentLoaded", function(){
+  const sel   = document.getElementById("userSelect");
+  const admin = document.getElementById("r_admin");
+  const tec   = document.getElementById("r_tecnico");
+  const usr   = document.getElementById("r_usuario");
+  const msg   = document.getElementById("msg");
+  const btn   = document.getElementById("btnSave");
+
+  // Carga mapa { "<id>":["admin","usuario"], ... } desde data-attribute
+  let rolesMap = {};
+  try{
+    const raw = document.getElementById("rolesMapSrc").dataset.rolesmap || "{}";
+    rolesMap = JSON.parse(raw);
+  }catch(_){ rolesMap = {}; }
+
+  function setMsg(text, ok){
+    msg.textContent = text || "";
+    msg.className = "ms-2 small " + (ok===true ? "text-success" : ok===false ? "text-danger" : "text-muted");
+  }
+  function reset(){
+    admin.checked = tec.checked = usr.checked = false;
+    admin.disabled = tec.disabled = false;
+  }
+  function enforceExclusion(){
+    if(admin.checked){ tec.checked=false; tec.disabled=true; } else { tec.disabled=false; }
+    if(tec.checked){ admin.checked=false; admin.disabled=true; } else { admin.disabled=false; }
+  }
+  admin.addEventListener("change", enforceExclusion);
+  tec.addEventListener("change", enforceExclusion);
+
+  sel.addEventListener("change", ()=>{
+    reset(); setMsg("", null);
+    const uid = sel.value;
+    const roles = rolesMap[String(uid)] || [];
+    roles.forEach(r=>{
+      if(r==="admin")   admin.checked = true;
+      if(r==="tecnico") tec.checked   = true;
+      if(r==="usuario") usr.checked   = true;
+    });
+    enforceExclusion();
+  });
+
+  document.getElementById("roleForm").addEventListener("submit", async (ev)=>{
+    ev.preventDefault(); setMsg("", null);
+    const uid = sel.value;
+    if(!uid){ setMsg("Selecciona un usuario.", false); return; }
+
+    const roles = [];
+    if(admin.checked) roles.push("admin");
+    if(tec.checked)   roles.push("tecnico");
+    if(usr.checked)   roles.push("usuario");
+    if(roles.includes("admin") && roles.includes("tecnico")){
+      setMsg("No puedes combinar admin y técnico.", false);
+      return;
+    }
+
+    btn.disabled = true;
+    try{
+      const r = await fetch("{% url 'maint_roles_set' %}", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ user_id: Number(uid), roles })
+      });
+      const data = await r.json().catch(()=>({}));
+      if(!r.ok){
+        setMsg(data.error || "Error al guardar", false);
+      }else{
+        rolesMap[String(uid)] = data.roles || [];
+        setMsg("Roles actualizados.", true);
+      }
+    }catch(_){ setMsg("Fallo de red.", false); }
+    finally{ btn.disabled = false; }
+  });
+
+  if(sel.options.length > 1){ sel.selectedIndex = 1; sel.dispatchEvent(new Event("change")); }
+});
+</script>
+{% endblock %}

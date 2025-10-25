@@ -1,0 +1,22 @@
+{% extends "tickets/base.html" %}
+{% block title %}Mantenedor · Coyahue{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-body">
+    <h5 class="mb-3">Mantenedor</h5>
+    {% if maint_sections %}
+      <div class="row g-3">
+        {% for s in maint_sections %}
+          <div class="col-sm-6 col-lg-4">
+            <a class="btn btn-light w-100 text-start" href="{% url 'maint_section' s.code %}">
+              <i class="bi bi-folder-gear me-1"></i> {{ s.name }}
+            </a>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="text-muted m-0">No tienes secciones asignadas.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

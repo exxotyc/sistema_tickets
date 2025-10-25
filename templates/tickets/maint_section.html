@@ -1,0 +1,13 @@
+{% extends "tickets/base.html" %}
+{% block title %}Sección · Mantenedor{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h5 class="m-0"><i class="bi bi-sliders2 me-1"></i> {{ code|default:section.code }}</h5>
+      <a class="btn btn-outline-secondary btn-sm" href="{% url 'maint_index' %}">Volver</a>
+    </div>
+    <p class="text-muted">Contenido de la sección <strong>{{ section.name|default:code }}</strong>.</p>
+  </div>
+</div>
+{% endblock %}

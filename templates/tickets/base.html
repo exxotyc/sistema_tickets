@@ -1,0 +1,223 @@
+{# templates/tickets/base.html #}
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Tickets · Coyahue{% endblock %}</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    {% block extra_head %}{% endblock %}
+
+    <style>
+      :root{ --bg-a:#0ea5e9; --bg-b:#6366f1; --glass:rgba(255,255,255,.78); --glass-border:rgba(255,255,255,.35) }
+      html,body{height:100%}
+      body{
+        background:
+          radial-gradient(1200px 900px at 20% -10%, var(--bg-a) 0%, transparent 60%),
+          radial-gradient(1000px 800px at 110% 10%, var(--bg-b) 0%, transparent 55%),
+          linear-gradient(180deg, #0f172a 0%, #0b1225 100%);
+        -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+      }
+      .navbar{
+        backdrop-filter:saturate(140%) blur(10px);
+        background:var(--glass)!important;
+        border-bottom:1px solid var(--glass-border)!important;
+      }
+      .navbar-brand{font-weight:700; letter-spacing:.2px}
+      .badge-soft{background:#fff; border:1px solid rgba(2,6,23,.08); color:#0f172a}
+      .card{
+        border-radius:1rem; border:1px solid rgba(15,23,42,.06);
+        background:rgba(255,255,255,.92); backdrop-filter:blur(6px);
+        box-shadow:0 18px 40px rgba(2,6,23,.12);
+      }
+      .btn{border-radius:.75rem; position:relative; overflow:hidden}
+      .btn-ripple::after{
+        content:""; position:absolute; width:0; height:0; border-radius:50%;
+        background:rgba(255,255,255,.5); transform:translate(-50%,-50%);
+        left:var(--x,50%); top:var(--y,50%); transition:width .4s ease, height .4s ease;
+      }
+      .btn-ripple:active::after{width:220px; height:220px}
+
+      .notif-fab{
+        position:fixed; right:18px; bottom:18px; z-index:1080;
+        border-radius:999px; padding:.65rem .8rem;
+        box-shadow:0 10px 24px rgba(2,6,23,.16);
+      }
+      .notif-badge{ position:absolute; top:-6px; right:-6px; }
+    </style>
+  </head>
+
+  <body>
+    {% if request.user.is_authenticated %}
+    <button id="btnNotif" class="btn btn-primary notif-fab btn-ripple" aria-label="Notificaciones">
+      <i class="bi bi-bell"></i>
+      <span id="notifCount" class="badge text-bg-danger notif-badge d-none">0</span>
+    </button>
+
+    <div id="notifPanel" class="card shadow-sm" style="position:fixed; right:18px; bottom:74px; width:320px; display:none; z-index:1080;">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Notificaciones</span>
+        <button class="btn btn-sm btn-outline-secondary" id="notifClose" aria-label="Cerrar"><i class="bi bi-x-lg"></i></button>
+      </div>
+      <ul id="notifList" class="list-group list-group-flush">
+        <li class="list-group-item text-muted">Sin notificaciones.</li>
+      </ul>
+    </div>
+    {% endif %}
+
+    <nav class="navbar navbar-expand-lg sticky-top">
+      <div class="container">
+        <a class="navbar-brand d-flex align-items-center gap-2" href="{% url 'index' %}">
+          <i class="bi bi-ticket-perforated-fill text-primary"></i>
+          <span>Coyahue Tickets</span>
+          <span class="badge rounded-pill badge-soft">Coyahue</span>
+        </a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav" aria-label="Abrir navegación">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div id="nav" class="collapse navbar-collapse">
+          <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+            {% if request.user.is_authenticated %}
+              <li class="nav-item">
+                <a class="nav-link" href="{% url 'dashboard' %}">
+                  <i class="bi bi-speedometer2 me-1"></i>Dashboard
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link" href="{% url 'metrics_page' %}" data-hard-nav="1">
+                  <i class="bi bi-graph-up me-1"></i>Métricas
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link" href="{% url 'ticket_list' %}" data-hard-nav="1">
+                  <i class="bi bi-list-ul me-1"></i>Listado
+                </a>
+              </li>
+
+              {% if maint_sections %}
+                <li class="nav-item dropdown">
+                  <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown" role="button" aria-expanded="false">
+                    <i class="bi bi-gear me-1"></i>Mantenedor
+                  </a>
+                  <ul class="dropdown-menu">
+                    {# Opcional: link de Roles visible solo para staff/admin #}
+                    {% if request.user.is_staff %}
+                      <li><a class="dropdown-item" href="{% url 'maint_roles' %}">Roles</a></li>
+                      <li><hr class="dropdown-divider"></li>
+                    {% endif %}
+
+                    {% for s in maint_sections %}
+                      <li><a class="dropdown-item" href="{% url 'maint_section' s.code %}">{{ s.title }}</a></li>
+                    {% endfor %}
+
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item" href="{% url 'maint_index' %}">Ver todas</a></li>
+                  </ul>
+                </li>
+              {% endif %}
+            {% endif %}
+          </ul>
+
+          <div class="d-flex align-items-center gap-2">
+            {% if request.user.is_authenticated %}
+              <span class="text-muted small">Hola, {{ request.user.username }}</span>
+              <a class="btn btn-outline-secondary btn-sm btn-ripple" href="{% url 'logout' %}">
+                <i class="bi bi-box-arrow-right me-1"></i>Salir
+              </a>
+            {% else %}
+              <a class="btn btn-primary btn-sm btn-ripple" href="{% url 'login' %}">
+                <i class="bi bi-box-arrow-in-right me-1"></i>Iniciar sesión
+              </a>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <main class="container my-4">
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="py-4 text-center text-muted">
+      <div class="container">© {% now "Y" %} Coyahue</div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+      document.addEventListener("pointerdown",(e)=>{
+        const btn=e.target.closest(".btn-ripple"); if(!btn) return;
+        const r=btn.getBoundingClientRect();
+        btn.style.setProperty("--x",(e.clientX-r.left)+"px");
+        btn.style.setProperty("--y",(e.clientY-r.top)+"px");
+      });
+
+      document.addEventListener("click",(e)=>{
+        const a=e.target.closest('a[data-hard-nav="1"]'); if(!a) return;
+        e.preventDefault(); window.location.assign(a.getAttribute("href"));
+      });
+    </script>
+
+    {% if request.user.is_authenticated %}
+    <script>
+      function getCookie(name){
+        const m=document.cookie.match('(^|;)\\s*'+name+'\\s*=\\s*([^;]+)'); return m?m.pop():"";
+      }
+      (async ()=>{
+        try{
+          if(!localStorage.getItem("access_token")){
+            const r=await fetch("{% url 'api:token_session' %}", {
+              method:"POST", headers: {"X-CSRFToken": getCookie("csrftoken")}
+            });
+            if(r.ok){
+              const data=await r.json();
+              localStorage.setItem("access_token", data.access);
+              localStorage.setItem("refresh_token", data.refresh);
+              localStorage.setItem("username", "{{ request.user.username }}");
+            }
+          }
+        }catch(_){}
+      })();
+    </script>
+
+    <script>
+      const btnNotif=document.getElementById("btnNotif");
+      const panel=document.getElementById("notifPanel");
+      const countEl=document.getElementById("notifCount");
+      const listEl=document.getElementById("notifList");
+      const closeBtn=document.getElementById("notifClose");
+
+      if(btnNotif && panel){
+        btnNotif.addEventListener("click", ()=>{
+          panel.style.display = panel.style.display==="block" ? "none" : "block";
+        });
+        closeBtn?.addEventListener("click", ()=> panel.style.display="none");
+        document.addEventListener("click",(e)=>{
+          if(panel.style.display!=="block") return;
+          if(e.target.closest("#notifPanel") || e.target.closest("#btnNotif")) return;
+          panel.style.display="none";
+        });
+      }
+
+      async function loadNotifs(){
+        const items = [];
+        if(items.length){
+          countEl.textContent=items.length;
+          countEl.classList.remove("d-none");
+          listEl.innerHTML = items.map(n=>`<li class="list-group-item">${n.text}</li>`).join("");
+        }else{
+          countEl.classList.add("d-none");
+          listEl.innerHTML = '<li class="list-group-item text-muted">Sin notificaciones.</li>';
+        }
+      }
+      loadNotifs();
+    </script>
+    {% endif %}
+
+    {% block auth_protect %}{% endblock %}
+    {% block extra_js %}{% endblock %}
+  </body>
+</html>

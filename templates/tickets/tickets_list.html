@@ -1,0 +1,96 @@
+{% extends "tickets/base.html" %}
+{% block title %}Tickets · Coyahue{% endblock %}
+
+{% block extra_head %}
+<style>
+  .glass{background:rgba(255,255,255,.92); backdrop-filter:blur(6px); border:1px solid rgba(15,23,42,.06); border-radius:1rem}
+  .grid{
+    display:grid;
+    grid-template-columns:repeat(1,minmax(0,1fr));
+    gap:12px;
+  }
+  @media (min-width:576px){ .grid{grid-template-columns:repeat(2,1fr)}}
+  @media (min-width:992px){ .grid{grid-template-columns:repeat(3,1fr)}}
+  .card-ticket{
+    display:block; text-decoration:none; color:inherit;
+    border:1px solid rgba(15,23,42,.08); border-radius:14px;
+    background:#fff; padding:14px; transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+  }
+  .card-ticket:hover{ transform:translateY(-2px); box-shadow:0 10px 24px rgba(2,6,23,.10); border-color:rgba(15,23,42,.16) }
+  .badge-pill{border-radius:999px; padding:.35rem .6rem; font-size:.75rem}
+  .meta{display:flex; flex-wrap:wrap; gap:8px; color:#6c757d; font-size:.85rem}
+  .line{height:1px; background:rgba(15,23,42,.06); margin:.5rem 0}
+  .truncate-2{display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="glass p-3 p-md-4">
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h1 class="h5 m-0 d-flex align-items-center gap-2">
+      <i class="bi bi-ticket-perforated"></i> Tickets
+    </h1>
+
+    <form class="d-flex gap-2" action="{% url 'ticket_list' %}" method="get" role="search">
+      <select name="state" class="form-select form-select-sm" style="width:160px">
+        <option value="" {% if not state %}selected{% endif %}>Todos</option>
+        <option value="open" {% if state == 'open' %}selected{% endif %}>Abiertos</option>
+        <option value="in_progress" {% if state == 'in_progress' %}selected{% endif %}>En progreso</option>
+        <option value="resolved" {% if state == 'resolved' %}selected{% endif %}>Resueltos</option>
+        <option value="closed" {% if state == 'closed' %}selected{% endif %}>Cerrados</option>
+      </select>
+      <input name="q" value="{{ q }}" class="form-control form-control-sm" placeholder="Buscar título o descripción">
+      <button class="btn btn-outline-secondary btn-sm btn-ripple" type="submit">Filtrar</button>
+      <a href="{% url 'ticket_new' %}" class="btn btn-primary btn-sm btn-ripple" data-hard-nav="1">Nuevo</a>
+    </form>
+  </div>
+
+  {% if tickets %}
+    <div class="grid">
+      {% for t in tickets %}
+        <a href="{% url 'ticket_detail' t.id %}" class="card-ticket" data-hard-nav="1" aria-label="Ticket {{ t.id }}">
+          <div class="d-flex justify-content-between align-items-start gap-2">
+            <h5 class="mb-1">#{{ t.id }} {{ t.title|default:"Sin título" }}</h5>
+            {% if t.state == "open" %}
+              <span class="badge badge-pill text-bg-danger">Abierto</span>
+            {% elif t.state == "in_progress" %}
+              <span class="badge badge-pill text-bg-warning">En progreso</span>
+            {% elif t.state == "resolved" %}
+              <span class="badge badge-pill text-bg-primary">Resuelto</span>
+            {% elif t.state == "closed" %}
+              <span class="badge badge-pill text-bg-success">Cerrado</span>
+            {% else %}
+              <span class="badge badge-pill text-bg-secondary">{{ t.get_state_display }}</span>
+            {% endif %}
+          </div>
+
+          <div class="text-muted truncate-2">{{ t.description|default_if_none:"—" }}</div>
+          <div class="line"></div>
+
+          <div class="meta">
+            <span><i class="bi bi-calendar2"></i> {{ t.created_at|date:"Y-m-d H:i" }}</span>
+            {% if t.category %}<span><i class="bi bi-tag"></i> {{ t.category.name }}</span>{% endif %}
+            {% if t.priority %}
+              <span><i class="bi bi-flag"></i>
+                {% if t.priority == "high" %}Alta{% elif t.priority == "medium" %}Media{% else %}Baja{% endif %}
+              </span>
+            {% endif %}
+          </div>
+        </a>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="text-center text-muted py-5">No hay tickets.</div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  // fuerza navegación completa para evitar capturas SPA
+  document.addEventListener("click",(e)=>{
+    const a=e.target.closest('a[data-hard-nav="1"]'); if(!a) return;
+    e.preventDefault(); window.location.assign(a.getAttribute("href"));
+  });
+</script>
+{% endblock %}

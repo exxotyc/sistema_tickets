@@ -1,0 +1,135 @@
+{% extends "tickets/base.html" %}
+{% block title %}Mantenedor · Categorías{% endblock %}
+
+{% block extra_head %}
+<style>
+  .glass{background:rgba(255,255,255,.92);backdrop-filter:blur(6px);border:1px solid rgba(15,23,42,.06);border-radius:1rem}
+  .row-gap{row-gap:12px}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="glass p-3 p-md-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h5 m-0 d-flex align-items-center gap-2"><i class="bi bi-folder-gear"></i> Categorías</h1>
+    <a class="btn btn-outline-secondary btn-sm btn-ripple" href="{% url 'maint_index' %}">Volver</a>
+  </div>
+
+  <form id="frmNew" class="row g-2 row-gap align-items-end mb-3">
+    <div class="col-sm-7 col-md-8">
+      <label class="form-label m-0">Nombre</label>
+      <input id="newName" class="form-control" placeholder="Ej. Red/Internet" required>
+    </div>
+    <div class="col-sm-5 col-md-4 d-grid">
+      <button class="btn btn-primary btn-ripple" type="submit"><i class="bi bi-plus-lg me-1"></i>Crear</button>
+    </div>
+  </form>
+
+  <div class="input-group mb-3">
+    <span class="input-group-text"><i class="bi bi-search"></i></span>
+    <input id="q" class="form-control" placeholder="Buscar…">
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-hover align-middle">
+      <thead class="table-light">
+        <tr>
+          <th style="width:90px">ID</th>
+          <th>Nombre</th>
+          <th style="width:160px"></th>
+        </tr>
+      </thead>
+      <tbody id="rows">
+        <tr><td colspan="3" class="text-center text-muted py-4">Cargando…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function esc(s){return String(s||"").replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));}
+async function apiFetch(url, opts={}){
+  const t=localStorage.getItem("access_token"); if(!t){ alert("Sesión inválida"); return null; }
+  const r=await fetch(url, {...opts, headers:{...(opts.headers||{}), Authorization:"Bearer "+t}});
+  if(r.status===401){ alert("No autorizado"); return null; }
+  return r;
+}
+let allItems=[];
+
+function render(list){
+  const tb=document.getElementById("rows");
+  if(!list.length){ tb.innerHTML='<tr><td colspan="3" class="text-center text-muted py-4">Sin categorías</td></tr>'; return; }
+  tb.innerHTML="";
+  for(const c of list){
+    const tr=document.createElement("tr");
+    tr.innerHTML=`
+      <td>${c.id}</td>
+      <td>
+        <input class="form-control form-control-sm" value="${esc(c.name||"")}" data-id="${c.id}">
+      </td>
+      <td class="text-end">
+        <button class="btn btn-sm btn-outline-primary me-1" data-act="save" data-id="${c.id}">
+          <i class="bi bi-save"></i> Guardar
+        </button>
+        <button class="btn btn-sm btn-outline-danger" data-act="del" data-id="${c.id}">
+          <i class="bi bi-trash"></i> Eliminar
+        </button>
+      </td>`;
+    tb.appendChild(tr);
+  }
+}
+
+async function load(){
+  const r=await apiFetch("/api/categories/");
+  if(!r) return;
+  const data=await r.json();
+  allItems = Array.isArray(data)?data:(data.results||[]);
+  applyFilter();
+}
+
+function applyFilter(){
+  const q=document.getElementById("q").value.trim().toLowerCase();
+  const list=!q?allItems:allItems.filter(x=>(x.name||"").toLowerCase().includes(q));
+  render(list);
+}
+
+document.getElementById("q").addEventListener("input", applyFilter);
+
+document.getElementById("frmNew").addEventListener("submit", async (e)=>{
+  e.preventDefault();
+  const name=document.getElementById("newName").value.trim();
+  if(!name) return;
+  const r=await apiFetch("/api/categories/", {
+    method:"POST", headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ name })
+  });
+  if(!r || !r.ok){ alert("No se pudo crear"); return; }
+  document.getElementById("newName").value="";
+  load();
+});
+
+document.getElementById("rows").addEventListener("click", async (e)=>{
+  const btn=e.target.closest("button[data-act]"); if(!btn) return;
+  const id=btn.dataset.id;
+  if(btn.dataset.act==="save"){
+    const input=document.querySelector(`input[data-id="${id}"]`);
+    const name=input.value.trim();
+    const r=await apiFetch(`/api/categories/${id}/`, {
+      method:"PATCH", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ name })
+    });
+    if(!r || !r.ok){ alert("No se pudo guardar"); return; }
+    load();
+  }else if(btn.dataset.act==="del"){
+    if(!confirm("¿Eliminar categoría?")) return;
+    const r=await apiFetch(`/api/categories/${id}/`, { method:"DELETE" });
+    if(!r || (r.status!==204 && !r.ok)){ alert("No se pudo eliminar"); return; }
+    load();
+  }
+});
+
+load();
+</script>
+{% endblock %}

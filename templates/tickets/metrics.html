@@ -1,0 +1,131 @@
+{% extends "tickets/base.html" %}
+{% block title %}Métricas · Coyahue{% endblock %}
+
+{% block extra_head %}
+<style>
+  .kpi{display:grid;gap:.5rem}
+  .kpi .num{font-size:1.6rem;font-weight:700}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-body">
+    <form id="filtros" class="row g-2 align-items-end mb-3">
+      <div class="col-6 col-md-2">
+        <label class="form-label">Desde</label>
+        <input type="date" name="from" class="form-control">
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label">Hasta</label>
+        <input type="date" name="to" class="form-control">
+      </div>
+      <div class="col-12 col-md-3">
+        <label class="form-label">Categoría</label>
+        <select name="category" class="form-select">
+          <option value="">Todas</option>
+          {% for c in categories %}
+            <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-md-3">
+        <label class="form-label">Técnico</label>
+        <select name="assignee" class="form-select">
+          <option value="">Todos</option>
+          {% for u in techs %}
+            <option value="{{ u.id }}">{{ u.username }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-md-2">
+        <label class="form-label">Prioridad</label>
+        <select name="priority" class="form-select">
+          <option value="">Todas</option>
+          <option value="low">Baja</option>
+          <option value="medium">Media</option>
+          <option value="high">Alta</option>
+        </select>
+      </div>
+      <div class="col-12">
+        <button class="btn btn-primary btn-sm btn-ripple" type="submit">Aplicar</button>
+      </div>
+    </form>
+
+    <div class="row g-3" id="kpis">
+      <div class="col-6 col-md-3"><div class="kpi card p-3"><div>Abiertos</div><div class="num" id="k_open">0</div></div></div>
+      <div class="col-6 col-md-3"><div class="kpi card p-3"><div>En progreso</div><div class="num" id="k_inp">0</div></div></div>
+      <div class="col-6 col-md-3"><div class="kpi card p-3"><div>Resueltos</div><div class="num" id="k_res">0</div></div></div>
+      <div class="col-6 col-md-3"><div class="kpi card p-3"><div>Cerrados</div><div class="num" id="k_clo">0</div></div></div>
+      <div class="col-6 col-md-3"><div class="kpi card p-3"><div>Críticos</div><div class="num" id="k_crit">0</div></div></div>
+      <div class="col-6 col-md-3"><div class="kpi card p-3"><div>MTTR (h)</div><div class="num" id="k_mttr">0</div></div></div>
+      <div class="col-6 col-md-3"><div class="kpi card p-3"><div>FRT (h)</div><div class="num" id="k_frt">0</div></div></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script type="module">
+  const form = document.getElementById("filtros");
+
+  function setDefaultDates(){
+    const f = form.elements["from"], t = form.elements["to"];
+    if(!f.value || !t.value){
+      const now = new Date();
+      const prev = new Date(); prev.setDate(now.getDate() - 30);
+      f.valueAsDate = prev;
+      t.valueAsDate = now;
+    }
+  }
+
+  async function authFetch(url, opts={}){
+    const access = localStorage.getItem("access_token") || "";
+    const r = await fetch(url, {
+      ...opts,
+      headers:{ ...(opts.headers||{}), Authorization:`Bearer ${access}` }
+    });
+    if(r.status !== 401) return r;
+
+    const refresh = localStorage.getItem("refresh_token");
+    if(!refresh) throw new Error("unauth");
+    const rr = await fetch("{% url 'api:token_refresh' %}", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ refresh })
+    });
+    if(!rr.ok) throw new Error("refresh");
+    const data = await rr.json();
+    localStorage.setItem("access_token", data.access);
+    return fetch(url, {
+      ...opts,
+      headers:{ ...(opts.headers||{}), Authorization:`Bearer ${data.access}` }
+    });
+  }
+
+  function readForm(){
+    const d = new FormData(form), obj = {};
+    for (const [k,v] of d.entries()){ if(v) obj[k]=v; }
+    return obj;
+  }
+  function setK(id,val){ document.getElementById(id).textContent = String(val ?? 0); }
+
+  async function load(){
+    const params = new URLSearchParams(readForm()).toString();
+    const r = await authFetch(`/api/metrics/summary?${params}`);
+    if(!r.ok) return;
+    const m = await r.json();
+    setK("k_open", m.open);
+    setK("k_inp", m.in_progress);
+    setK("k_res", m.resolved);
+    setK("k_clo", m.closed);
+    setK("k_crit", m.critical);
+    setK("k_mttr", m.mttr_hours);
+    setK("k_frt", m.frt_hours);
+  }
+
+  form.addEventListener("submit", e=>{ e.preventDefault(); load(); });
+  setDefaultDates();
+  load();
+</script>
+{% endblock %}

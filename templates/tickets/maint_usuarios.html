@@ -1,0 +1,103 @@
+{% extends "tickets/base.html" %}
+{% block title %}Mantenedor · Usuarios{% endblock %}
+
+{% block extra_head %}
+<style>
+  .glass{background:rgba(255,255,255,.92);backdrop-filter:blur(6px);border:1px solid rgba(15,23,42,.06);border-radius:1rem}
+  .tag{font-size:.75rem}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="glass p-3 p-md-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h5 m-0 d-flex align-items-center gap-2"><i class="bi bi-people"></i> Usuarios</h1>
+    <a class="btn btn-outline-secondary btn-sm btn-ripple" href="{% url 'maint_index' %}">Volver</a>
+  </div>
+
+  <div class="input-group mb-3">
+    <span class="input-group-text"><i class="bi bi-search"></i></span>
+    <input id="q" class="form-control" placeholder="Buscar usuario…">
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-hover align-middle">
+      <thead class="table-light">
+        <tr>
+          <th style="width:90px">ID</th>
+          <th>Usuario</th>
+          <th style="width:130px">Staff</th>
+          <th style="width:240px">Roles</th>
+        </tr>
+      </thead>
+      <tbody id="rows">
+        <tr><td colspan="4" class="text-center text-muted py-4">Cargando…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="alert alert-info mt-3">
+    Esta vista es solo lectura. La asignación de grupos/roles se hace en el admin de Django o en un endpoint dedicado.
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function esc(s){return String(s||"").replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));}
+async function apiFetch(url, opts={}){
+  const t=localStorage.getItem("access_token"); if(!t){ alert("Sesión inválida"); return null; }
+  const r=await fetch(url, {...opts, headers:{...(opts.headers||{}), Authorization:"Bearer "+t}});
+  if(r.status===401){ alert("No autorizado"); return null; }
+  return r;
+}
+let allItems=[];
+
+function render(list){
+  const tb=document.getElementById("rows");
+  if(!list.length){ tb.innerHTML='<tr><td colspan="4" class="text-center text-muted py-4">Sin usuarios</td></tr>'; return; }
+  tb.innerHTML="";
+  for(const u of list){
+    const roles = Array.isArray(u.roles)?u.roles:[];
+    const tr=document.createElement("tr");
+    tr.innerHTML=`
+      <td>${u.id}</td>
+      <td><strong>${esc(u.username||"-")}</strong></td>
+      <td>${u.is_staff?'<span class="badge text-bg-primary tag">Sí</span>':'<span class="badge text-bg-secondary tag">No</span>'}</td>
+      <td>${roles.length?roles.map(r=>`<span class="badge text-bg-light me-1 tag">${esc(r)}</span>`).join(""):'<span class="text-muted">—</span>'}</td>
+    `;
+    tb.appendChild(tr);
+  }
+}
+
+function applyFilter(){
+  const q=document.getElementById("q").value.trim().toLowerCase();
+  const list=!q?allItems:allItems.filter(x=>(x.username||"").toLowerCase().includes(q));
+  render(list);
+}
+
+document.getElementById("q").addEventListener("input", applyFilter);
+
+async function load(){
+  const r=await apiFetch("/api/users/");
+  if(!r) return;
+  const data=await r.json();
+  // Ampliar payload con roles e is_staff mediante /api/token/ opcional
+  allItems = data.map(u=>({
+    id:u.id, username:u.username, is_staff: !!u.is_staff, roles: u.roles||[]
+  }));
+  // Si el endpoint no trae is_staff y roles, intentar decodificar del propio token del navegador:
+  try{
+    const tok=localStorage.getItem("access_token");
+    const payload = JSON.parse(atob(tok.split(".")[1]));
+    if(payload && payload.username){
+      // No se sobreescribe lista. Solo garantiza que al menos el usuario actual tenga flags.
+      const me = allItems.find(x=>x.username===payload.username);
+      if(me){ me.is_staff = !!payload.is_staff; me.roles = payload.roles||me.roles; }
+    }
+  }catch(_){}
+  applyFilter();
+}
+load();
+</script>
+{% endblock %}

@@ -1,0 +1,409 @@
+{% extends "tickets/base.html" %}
+{% block title %}Ticket · Coyahue{% endblock %}
+
+{% block extra_head %}
+<style>
+  .glass{background:rgba(255,255,255,.92); backdrop-filter:blur(6px); border:1px solid rgba(15,23,42,.06); border-radius:1rem}
+  .meta dt{color:#6c757d; width:140px}
+  .meta dd{margin-bottom:.5rem}
+  .attachment{display:flex; align-items:center; gap:.5rem}
+</style>
+{% endblock %}
+
+{% block content %}
+<div
+  class="glass p-3 p-md-4"
+  id="ticket-root"
+  data-ticket-id="{{ ticket_id }}"
+  data-admin="{% if is_admin %}1{% else %}0{% endif %}"
+>
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 id="tTitle" class="h5 m-0 d-flex align-items-center gap-2">
+      <i class="bi bi-ticket-perforated"></i> Ticket
+    </h1>
+    <a href="{% url 'ticket_list' %}" class="btn btn-outline-secondary btn-sm btn-ripple" data-hard-nav="1">
+      <i class="bi bi-arrow-left"></i> Volver
+    </a>
+  </div>
+
+  <div class="row g-4">
+    <!-- Col principal -->
+    <div class="col-lg-8">
+      <div class="card">
+        <div class="card-body">
+          <h5 class="mb-2" id="title">—</h5>
+          <p id="description" class="text-muted">—</p>
+        </div>
+      </div>
+
+      <div class="card mt-3">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="m-0"><i class="bi bi-chat-left-text me-1"></i> Comentarios</h6>
+          </div>
+
+          <ul id="comments" class="list-group list-group-flush mb-3"></ul>
+
+          <form id="frmComment" class="d-flex gap-2">
+            <input id="commentText" class="form-control" placeholder="Escribe un comentario…" required>
+            <button class="btn btn-primary btn-ripple" type="submit"><i class="bi bi-send"></i></button>
+          </form>
+        </div>
+      </div>
+
+      <div class="card mt-3">
+        <div class="card-body">
+          <h6 class="mb-2"><i class="bi bi-paperclip me-1"></i> Adjuntos</h6>
+          <ul id="attachments" class="list-group list-group-flush mb-3"></ul>
+
+          <form id="frmAttach" class="d-flex flex-wrap gap-2" enctype="multipart/form-data">
+            <input id="file" name="file" type="file" class="form-control"
+                   accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.xlsx,.docx,.pptx,.log"
+                   required data-validate-file>
+            <button class="btn btn-outline-primary btn-ripple" type="submit">
+              <i class="bi bi-upload"></i> Subir
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Col lateral -->
+    <div class="col-lg-4">
+      <!-- Panel admin -->
+      <div id="adminPanel" class="card d-none">
+        <div class="card-body">
+          <h6 class="mb-3"><i class="bi bi-tools me-1"></i> Acciones de administración</h6>
+
+          <div class="mb-3">
+            <label class="form-label">Asignar a técnico</label>
+            <div class="d-flex gap-2">
+              <select id="techSelect" class="form-select">
+                <option value="" selected disabled>Cargando…</option>
+              </select>
+              <button id="btnAssign" class="btn btn-primary btn-ripple" title="Asignar">
+                <i class="bi bi-person-check"></i>
+              </button>
+            </div>
+            <div id="assignMsg" class="form-text"></div>
+          </div>
+
+          <div class="row g-2">
+            <div class="col-6">
+              <label class="form-label">Estado</label>
+              <select id="stateSelect" class="form-select form-select-sm">
+                <option value="open">Abierto</option>
+                <option value="in_progress">En progreso</option>
+                <option value="resolved">Resuelto</option>
+                <option value="closed">Cerrado</option>
+              </select>
+            </div>
+            <div class="col-6">
+              <label class="form-label">Prioridad</label>
+              <select id="prioSelect" class="form-select form-select-sm">
+                <option value="low">Baja</option>
+                <option value="medium">Media</option>
+                <option value="high">Alta</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="d-flex flex-wrap gap-2 mt-3">
+            <button id="btnSaveMeta" class="btn btn-outline-primary btn-sm btn-ripple">
+              <i class="bi bi-save"></i> Guardar
+            </button>
+            <button id="btnStart" class="btn btn-outline-secondary btn-sm btn-ripple">
+              <i class="bi bi-play"></i> En progreso
+            </button>
+            <button id="btnResolve" class="btn btn-outline-success btn-sm btn-ripple">
+              <i class="bi bi-check2-circle"></i> Resolver
+            </button>
+            <button id="btnClose" class="btn btn-outline-dark btn-sm btn-ripple">
+              <i class="bi bi-lock"></i> Cerrar
+            </button>
+            <button id="btnReopen" class="btn btn-outline-warning btn-sm btn-ripple">
+              <i class="bi bi-arrow-counterclockwise"></i> Reabrir
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Detalle -->
+      <div class="card mt-3">
+        <div class="card-body">
+          <h6 class="mb-3">Detalle</h6>
+          <dl class="row meta">
+            <dt class="col-4">ID</dt><dd id="m_id" class="col-8">—</dd>
+            <dt class="col-4">Estado</dt><dd id="m_state" class="col-8">—</dd>
+            <dt class="col-4">Prioridad</dt><dd id="m_priority" class="col-8">—</dd>
+            <dt class="col-4">Categoría</dt><dd id="m_category" class="col-8">—</dd>
+            <dt class="col-4">Solicitante</dt><dd id="m_requester" class="col-8">—</dd>
+            <dt class="col-4">Asignado a</dt><dd id="m_assigned" class="col-8">—</dd>
+            <dt class="col-4">Creado</dt><dd id="m_created" class="col-8">—</dd>
+            <dt class="col-4">Actualizado</dt><dd id="m_updated" class="col-8">—</dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block auth_protect %}
+<script>
+(async function ensureAuth(){
+  const access = localStorage.getItem("access_token");
+  if(!access){ location.href="/"; return; }
+  try{
+    const r = await fetch("/api/stats/", { headers:{ Authorization:"Bearer "+access }});
+    if(r.ok) return;
+  }catch(_){}
+  const refresh = localStorage.getItem("refresh_token");
+  if(!refresh){ localStorage.clear(); location.href="/"; return; }
+  const rr = await fetch("/api/token/refresh/", {
+    method:"POST", headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ refresh })
+  });
+  if(!rr.ok){ localStorage.clear(); location.href="/"; return; }
+  const data = await rr.json(); localStorage.setItem("access_token", data.access);
+})();
+</script>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  // apiFetch shim si falta
+  if(typeof window.apiFetch!=="function"){
+    window.apiFetch = async function(url, opts={}){
+      const access = localStorage.getItem("access_token");
+      const finalUrl = url.startsWith("http") ? url : (url.startsWith("/api") ? url : "/api"+url);
+      const r = await fetch(finalUrl, { ...opts, headers:{...(opts.headers||{}), Authorization:"Bearer "+access }});
+      if(r.status !== 401) return r;
+      const refresh = localStorage.getItem("refresh_token");
+      if(!refresh){ localStorage.clear(); location.assign("{% url 'login' %}"); return null; }
+      const rr = await fetch("/api/token/refresh/", {
+        method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ refresh })
+      });
+      if(!rr.ok){ localStorage.clear(); location.assign("{% url 'login' %}"); return null; }
+      const data = await rr.json();
+      localStorage.setItem("access_token", data.access);
+      return fetch(finalUrl, { ...opts, headers:{...(opts.headers||{}), Authorization:"Bearer "+data.access }});
+    }
+  }
+
+  // Forzar navegación dura en "Volver"
+  document.addEventListener("click",(e)=>{
+    const a=e.target.closest('a[data-hard-nav="1"]');
+    if(!a) return;
+    e.preventDefault();
+    window.location.assign(a.getAttribute("href"));
+  });
+
+  const ROOT = document.getElementById("ticket-root");
+  const TICKET_ID = Number(ROOT?.dataset.ticketId || "0");
+  const SERVER_ADMIN = ROOT?.dataset.admin === "1";
+
+  function esc(s){return String(s||"").replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));}
+  function fmt(d){ if(!d) return "-"; const dt=new Date(d); return dt.toLocaleString(); }
+  async function getJSON(url){ const r=await apiFetch(url); if(!r) return null; return r.json(); }
+  async function sendJSON(url, method, body){
+    const r = await apiFetch(url,{method, headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body)});
+    if(!r) return { ok:false, error:"No autenticado o token inválido" };
+    if(!r.ok){
+      let msg="Error";
+      try{ const j=await r.json(); msg=j.detail||j.error||JSON.stringify(j); }catch{}
+      return { ok:false, error:msg };
+    }
+    try{ return { ok:true, data: await r.json() }; }catch{ return { ok:true, data:null }; }
+  }
+
+  // --- Carga ticket ---
+  async function loadTicket(){
+    const data = await getJSON(`/api/tickets/${TICKET_ID}/`);
+    if(!data){ alert("No se pudo cargar el ticket."); location.href="{% url 'ticket_list' %}"; return; }
+
+    document.getElementById("tTitle").innerHTML = `<i class="bi bi-ticket-perforated"></i> Ticket #${data.id}`;
+    document.getElementById("title").textContent = data.title || "Sin título";
+    document.getElementById("description").textContent = data.description || "—";
+
+    document.getElementById("m_id").textContent       = data.id;
+    document.getElementById("m_state").textContent    = data.state || "-";
+    document.getElementById("m_priority").textContent = data.priority || "-";
+    document.getElementById("m_category").textContent = data.category_name || data.category || "-";
+    document.getElementById("m_requester").textContent= data.requester_username || data.requester || "-";
+    document.getElementById("m_assigned").textContent = data.assigned_to_username || data.assigned_to || "-";
+    document.getElementById("m_created").textContent  = fmt(data.created_at);
+    document.getElementById("m_updated").textContent  = fmt(data.updated_at);
+
+    const stSel = document.getElementById("stateSelect");
+    const prSel = document.getElementById("prioSelect");
+    if(stSel) stSel.value = data.state || "open";
+    if(prSel) prSel.value = data.priority || "medium";
+  }
+
+  // --- Comentarios ---
+async function loadComments(){
+  // pide solo los del ticket para evitar filtrar en cliente
+  const r = await apiFetch(`/api/comments/?ticket=${TICKET_ID}&ordering=created_at`);
+  if(!r) return;
+  const data = await r.json();
+  const items = data.results || (Array.isArray(data) ? data : []);
+  const ul = document.getElementById("comments");
+  ul.innerHTML = "";
+
+  if(!items.length){
+    ul.innerHTML = '<li class="list-group-item text-muted">Sin comentarios</li>';
+    return;
+  }
+
+  for(const c of items){
+    const who =
+      c.user_username ||
+      (c.user && typeof c.user === "object" && c.user.username) ||
+      (typeof c.user === "number" ? `usuario #${c.user}` : null) ||
+      c.username || "usuario";
+
+    const when = c.created_at || c.created || c.timestamp;
+    const text = c.content ?? c.text ?? "";
+
+    const li = document.createElement("li");
+    li.className = "list-group-item";
+    li.innerHTML = `
+      <div class="d-flex justify-content-between">
+        <strong>${esc(who)}</strong>
+        <small class="text-muted">${fmt(when)}</small>
+      </div>
+      <div>${esc(text)}</div>`;
+    ul.appendChild(li);
+  }
+}
+
+  // --- Adjuntos ---
+  async function loadAttachments(){
+    const r = await apiFetch(`/api/attachments/?ordering=-created_at`);
+    if(!r) return;
+    const data = await r.json();
+    const items = (data.results||data).filter(a => String(a.ticket)===String(TICKET_ID));
+    const ul = document.getElementById("attachments"); ul.innerHTML="";
+    if(!items.length){ ul.innerHTML = '<li class="list-group-item text-muted">Sin adjuntos</li>'; return; }
+    for(const a of items){
+      const li=document.createElement("li");
+      li.className="list-group-item";
+      const url = a.file || a.url || a.path || "#";
+      li.innerHTML = `
+        <div class="attachment">
+          <i class="bi bi-paperclip"></i>
+          <a href="${esc(url)}" target="_blank" rel="noopener">${esc(a.filename || a.name || url.split("/").pop())}</a>
+          <small class="text-muted ms-auto">${fmt(a.created_at)}</small>
+        </div>`;
+      ul.appendChild(li);
+    }
+  }
+
+  // --- Admin helpers ---
+  function jwtRoles(){
+    try{ return JSON.parse(localStorage.getItem("roles")||"[]"); }catch{ return []; }
+  }
+  function isAdmin(){
+    const roles = jwtRoles();
+    return SERVER_ADMIN || roles.includes("admin") || roles.includes("tecnico");
+  }
+
+  async function loadUsers(){
+    const sel = document.getElementById("techSelect");
+    const r = await apiFetch("/api/users/");
+    if(!r){ sel.innerHTML='<option value="" disabled>—</option>'; return; }
+    const users = await r.json();
+    sel.innerHTML = '<option value="" selected disabled>Selecciona técnico</option>';
+    for(const u of users){
+      const opt=document.createElement("option");
+      opt.value = u.id; opt.textContent = u.username;
+      sel.appendChild(opt);
+    }
+  }
+
+  // Asignar técnico
+  document.getElementById("btnAssign").addEventListener("click", async ()=>{
+    const user_id = document.getElementById("techSelect").value;
+    const msg = document.getElementById("assignMsg");
+    msg.className="form-text";
+    if(!user_id){ msg.textContent="Selecciona un técnico."; return; }
+
+    document.getElementById("btnAssign").disabled = true;
+    const r = await apiFetch(`/api/tickets/${TICKET_ID}/assign/`, {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ user_id: Number(user_id) })
+    });
+    document.getElementById("btnAssign").disabled = false;
+
+    if(!r || !r.ok){
+      let txt = "No se pudo asignar.";
+      try{ const j=await r.json(); txt = j.detail || j.error || txt; }catch{}
+      msg.textContent = txt; msg.className="form-text text-danger"; return;
+    }
+    msg.textContent="Asignado correctamente."; msg.className="form-text text-success";
+    await loadTicket();
+  });
+
+  // Guardar estado/prioridad
+  async function saveMeta(state, priority){
+    const ids=["btnSaveMeta","btnStart","btnResolve","btnClose","btnReopen"];
+    ids.forEach(id=>{ const b=document.getElementById(id); if(b) b.disabled=true; });
+    const res = await sendJSON(`/api/tickets/${TICKET_ID}/`, "PATCH", { state, priority });
+    ids.forEach(id=>{ const b=document.getElementById(id); if(b) b.disabled=false; });
+    if(!res.ok){ alert("Actualizar: "+res.error); return false; }
+    await loadTicket(); return true;
+  }
+  document.getElementById("btnSaveMeta").addEventListener("click", async ()=>{
+    const s = document.getElementById("stateSelect").value;
+    const p = document.getElementById("prioSelect").value;
+    await saveMeta(s,p);
+  });
+  document.getElementById("btnStart").addEventListener("click", async ()=>{ await saveMeta("in_progress", document.getElementById("prioSelect").value); });
+  document.getElementById("btnResolve").addEventListener("click", async ()=>{ await saveMeta("resolved", document.getElementById("prioSelect").value); });
+  document.getElementById("btnClose").addEventListener("click", async ()=>{ await saveMeta("closed", document.getElementById("prioSelect").value); });
+  document.getElementById("btnReopen").addEventListener("click", async ()=>{ await saveMeta("open", document.getElementById("prioSelect").value); });
+
+  // --- Comentarios / Adjuntos ---
+  document.getElementById("frmComment").addEventListener("submit", async (e)=>{
+    e.preventDefault();
+    const txt = document.getElementById("commentText");
+    const content = txt.value.trim();
+    if(!content) return;
+    const res = await sendJSON("/api/comments/", "POST", { ticket: TICKET_ID, content });
+    if(!res.ok){ alert("Comentario: "+res.error); return; }
+    txt.value=""; loadComments();
+  });
+
+  document.getElementById("frmAttach").addEventListener("submit", async (e)=>{
+    e.preventDefault();
+    const f = document.getElementById("file").files[0];
+    if(!f) return;
+    const fd = new FormData();
+    fd.append("ticket", TICKET_ID);
+    fd.append("file", f);
+    const r = await apiFetch("/api/attachments/", { method:"POST", body: fd });
+    if(!r || !r.ok){
+      let msg="No se pudo subir el archivo.";
+      try{ const j=await r.json(); msg = j.detail || j.error || msg; }catch{}
+      alert(msg); return;
+    }
+    document.getElementById("file").value="";
+    loadAttachments();
+  });
+
+  (async function init(){
+    if(!TICKET_ID || Number.isNaN(TICKET_ID)){ location.href="{% url 'ticket_list' %}"; return; }
+    await loadTicket();
+    await loadComments();
+    await loadAttachments();
+
+    if(isAdmin()){
+      document.getElementById("adminPanel").classList.remove("d-none");
+      await loadUsers();
+    }
+  })();
+</script>
+{% endblock %}

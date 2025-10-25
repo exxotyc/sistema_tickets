@@ -1,0 +1,139 @@
+{% extends "tickets/base.html" %}
+{% block title %}Nuevo ticket · Coyahue{% endblock %}
+
+{% block extra_head %}
+<style>
+  .glass{background:rgba(255,255,255,.92); backdrop-filter:blur(6px); border:1px solid rgba(15,23,42,.06); border-radius:1rem}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="glass p-3 p-md-4" id="new-root">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h5 m-0 d-flex align-items-center gap-2">
+      <i class="bi bi-plus-square"></i> Nuevo ticket
+    </h1>
+    <a href="{% url 'ticket_list' %}" class="btn btn-outline-secondary btn-sm btn-ripple" data-hard-nav="1">
+      <i class="bi bi-arrow-left"></i> Volver
+    </a>
+  </div>
+
+  <form id="frmNew" class="row g-3">
+    <div class="col-12">
+      <label class="form-label">Título</label>
+      <input id="title" class="form-control" required maxlength="200">
+    </div>
+    <div class="col-12">
+      <label class="form-label">Descripción</label>
+      <textarea id="description" class="form-control" rows="5" required></textarea>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Prioridad</label>
+      <select id="priority" class="form-select">
+        <option value="low">Baja</option>
+        <option value="medium" selected>Media</option>
+        <option value="high">Alta</option>
+      </select>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Categoría</label>
+      <select id="category" class="form-select">
+        <option value="">Sin categoría</option>
+      </select>
+    </div>
+    <div class="col-12 d-flex gap-2">
+      <button class="btn btn-primary btn-ripple" type="submit"><i class="bi bi-save"></i> Crear</button>
+      <button class="btn btn-outline-secondary btn-ripple" type="button" id="btnCancel">Cancelar</button>
+    </div>
+    <div id="msg" class="form-text"></div>
+  </form>
+</div>
+{% endblock %}
+
+{% block auth_protect %}
+<script>
+(async ()=>{
+  const t = localStorage.getItem("access_token");
+  if(!t){ location.assign("/"); return; }
+  try{
+    const r = await fetch("/api/stats/", { headers:{ Authorization:"Bearer "+t }});
+    if(!r.ok) throw 0;
+  }catch(_){
+    const refresh = localStorage.getItem("refresh_token");
+    if(!refresh){ localStorage.clear(); location.assign("/"); return; }
+    const rr = await fetch("/api/token/refresh/", {
+      method:"POST", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ refresh })
+    });
+    if(!rr.ok){ localStorage.clear(); location.assign("/"); return; }
+    const data = await rr.json(); localStorage.setItem("access_token", data.access);
+  }
+})();
+</script>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function authHeaders(){
+  const a = localStorage.getItem("access_token");
+  return { Authorization: "Bearer "+a };
+}
+async function api(url, opts={}){
+  const r = await fetch(url, { ...opts, headers:{ ...(opts.headers||{}), ...authHeaders(), "Content-Type":"application/json" }});
+  if(r.status!==401) return r;
+  // refresh
+  const refresh = localStorage.getItem("refresh_token");
+  if(!refresh){ localStorage.clear(); location.assign("/"); return null; }
+  const rr = await fetch("/api/token/refresh/", {
+    method:"POST", headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ refresh })
+  });
+  if(!rr.ok){ localStorage.clear(); location.assign("/"); return null; }
+  const data = await rr.json(); localStorage.setItem("access_token", data.access);
+  return fetch(url, { ...opts, headers:{ ...(opts.headers||{}), Authorization:"Bearer "+data.access, "Content-Type":"application/json" }});
+}
+
+// carga categorías
+(async ()=>{
+  try{
+    const r = await api("/api/categories/");
+    if(!r) return;
+    const data = await r.json();
+    const sel = document.getElementById("category");
+    sel.innerHTML = '<option value="">Sin categoría</option>';
+    (data.results||data).forEach(c=>{
+      const o = document.createElement("option");
+      o.value = c.id; o.textContent = c.name;
+      sel.appendChild(o);
+    });
+  }catch(_){}
+})();
+
+document.getElementById("btnCancel").addEventListener("click", (e)=>{
+  e.preventDefault(); window.location.assign("{% url 'ticket_list' %}");
+});
+
+document.getElementById("frmNew").addEventListener("submit", async (e)=>{
+  e.preventDefault();
+  const msg = document.getElementById("msg");
+  msg.textContent = "";
+  const payload = {
+    title: document.getElementById("title").value.trim(),
+    description: document.getElementById("description").value.trim(),
+    priority: document.getElementById("priority").value,
+    category: document.getElementById("category").value || null,
+  };
+  if(!payload.title || !payload.description){
+    msg.textContent="Completa título y descripción."; msg.className="form-text text-danger"; return;
+  }
+  const r = await api("/api/tickets/", { method:"POST", body: JSON.stringify(payload) });
+  if(!r || !r.ok){
+    let txt="No se pudo crear.";
+    try{ const j=await r.json(); txt=j.detail||j.error||txt; }catch{}
+    msg.textContent=txt; msg.className="form-text text-danger"; return;
+  }
+  const t = await r.json();
+  window.location.assign(`/tickets/${t.id}/`);
+});
+</script>
+{% endblock %}
