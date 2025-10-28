@@ -1,5 +1,6 @@
 # tickets/views.py
 from datetime import timedelta
+from time import perf_counter
 import re
 import json
 
@@ -44,6 +45,9 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 from rest_framework.authentication import SessionAuthentication
 
+from drf_yasg import openapi
+from drf_yasg.utils import swagger_auto_schema
+
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -54,6 +58,8 @@ from .serializers import (
     TicketSerializer, CategorySerializer, TicketLogSerializer,
     CommentSerializer, TicketAttachmentSerializer,
 )
+from .reports import build_report_rows, filters_footer
+from .services.metrics import TicketMetricsService
 
 # ==================== Helpers ====================
 
@@ -510,7 +516,7 @@ def maint_roles_set(request):
 
 
 # --- HELPERS MÉTRICAS ---
-def _parse_range(request):
+def parse_ticket_range(request):
     """from,to pueden venir como 'YYYY-MM-DD' o ISO datetime."""
     f = request.GET.get("from") or request.GET.get("date_from")
     t = request.GET.get("to") or request.GET.get("date_to")
@@ -534,8 +540,8 @@ def _parse_range(request):
 
     return _to_dt(f, True), _to_dt(t, False)
 
-def _apply_filters(qs, request):
-    fdt, tdt = _parse_range(request)
+def apply_ticket_filters(qs, request):
+    fdt, tdt = parse_ticket_range(request)
     category = request.GET.get("category")
     assignee = request.GET.get("assignee")
     priority = request.GET.get("priority")
@@ -560,149 +566,80 @@ def _apply_filters(qs, request):
         qs = qs.filter(priority=priority)
     return qs
 
-def _first_resolution_dt(ticket):
-    """Primera fecha de resolución basada en TicketLog (resolved/closed) si existe; si no, None."""
-    log = (TicketLog.objects
-           .filter(ticket=ticket, action__in=["resolved", "closed"])
-           .order_by("created_at")
-           .first())
-    return log.created_at if log else None
-
-def _first_response_dt(ticket):
-    """
-    FRT: primera respuesta de alguien distinto del solicitante.
-    Preferimos primer Comment de user != requester; si no, primer log de otro user.
-    """
-    c = (Comment.objects
-         .filter(ticket=ticket)
-         .exclude(user=ticket.requester)
-         .order_by("created_at")
-         .first())
-    if c:
-        return c.created_at
-    l = (TicketLog.objects
-         .filter(ticket=ticket)
-         .exclude(user=ticket.requester)
-         .order_by("created_at")
-         .first())
-    return l.created_at if l else None
-
-def _compute_summary(qs):
-    total = qs.count()
-    states = {
-        "open": qs.filter(state="open").count(),
-        "in_progress": qs.filter(state="in_progress").count(),
-        "resolved": qs.filter(state="resolved").count(),
-        "closed": qs.filter(state="closed").count(),
-    }
-    crit = qs.filter(priority__in=["high", "critical"]).count()
-
-    # MTTR en horas y FRT en minutos (promedios)
-    mttr_sum = 0.0
-    mttr_n = 0
-    frt_sum = 0.0
-    frt_n = 0
-
-    # Optimiza trayendo relaciones
-    qs_iter = qs.select_related("requester", "assigned_to", "category").only(
-        "id", "created_at", "requester_id", "priority", "state"
-    )
-
-    for t in qs_iter:
-        # MTTR
-        rdt = _first_resolution_dt(t)
-        if rdt:
-            delta = rdt - t.created_at
-            mttr_sum += delta.total_seconds() / 3600.0
-            mttr_n += 1
-        # FRT
-        fdt = _first_response_dt(t)
-        if fdt:
-            delta = fdt - t.created_at
-            frt_sum += delta.total_seconds() / 60.0
-            frt_n += 1
-
-    mttr_hours = round(mttr_sum / mttr_n, 2) if mttr_n else None
-    frt_minutes = round(frt_sum / frt_n, 2) if frt_n else None
-
-    return {
-        "total": total,
-        "by_state": states,
-        "critical": crit,
-        "mttr_hours": mttr_hours,
-        "frt_minutes": frt_minutes,
-    }
-
 # --- ENDPOINT: /api/metrics/summary ---
 def _visible_qs(u):
     return Ticket.objects.all() if _is_admin_or_tech(u) else Ticket.objects.filter(Q(requester=u)|Q(assigned_to=u))
 
+FILTER_QUERY_PARAMS = [
+    openapi.Parameter(
+        "from",
+        openapi.IN_QUERY,
+        description="Fecha mínima de creación (YYYY-MM-DD).",
+        type=openapi.TYPE_STRING,
+        required=False,
+    ),
+    openapi.Parameter(
+        "to",
+        openapi.IN_QUERY,
+        description="Fecha máxima de creación (YYYY-MM-DD).",
+        type=openapi.TYPE_STRING,
+        required=False,
+    ),
+    openapi.Parameter(
+        "category",
+        openapi.IN_QUERY,
+        description="Categoría por ID numérico o nombre exacto.",
+        type=openapi.TYPE_STRING,
+        required=False,
+    ),
+    openapi.Parameter(
+        "assignee",
+        openapi.IN_QUERY,
+        description="Asignado por ID numérico o username.",
+        type=openapi.TYPE_STRING,
+        required=False,
+    ),
+    openapi.Parameter(
+        "priority",
+        openapi.IN_QUERY,
+        description="Prioridad exacta (low, medium, high, critical).",
+        type=openapi.TYPE_STRING,
+        required=False,
+    ),
+]
+
+
+@swagger_auto_schema(method="get", manual_parameters=FILTER_QUERY_PARAMS)
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
 def metrics_summary(request):
     qs = _visible_qs(request.user)
-
-    f = (request.GET.get("from") or "").strip()
-    t = (request.GET.get("to") or "").strip()
-    cat = (request.GET.get("category") or "").strip()
-    asg = (request.GET.get("assignee") or "").strip()
-    prio = (request.GET.get("priority") or "").strip()
-
-    tz = get_current_timezone()
-    # fechas inclusivas
-    try:
-        if f:
-            start = make_aware(datetime.combine(datetime.fromisoformat(f).date(), time.min), tz)
-            qs = qs.filter(created_at__gte=start)
-        if t:
-            end = make_aware(datetime.combine(datetime.fromisoformat(t).date(), time.max), tz)
-            qs = qs.filter(created_at__lte=end)
-    except ValueError:
-        pass
-
-    if cat.isdigit():
-        qs = qs.filter(category_id=int(cat))
-    if asg.isdigit():
-        qs = qs.filter(assigned_to_id=int(asg))
-    if prio in ("low","medium","high"):
-        qs = qs.filter(priority=prio)
-
-    # conteos por estado
-    state_counts = {s:0 for s in ("open","in_progress","resolved","closed")}
-    for row in qs.values("state").annotate(c=Count("id")):
-        state_counts[row["state"]] = row["c"]
-
-    critical = qs.filter(priority="high").count()
-
-    # MTTR (resuelto/cerrado) y FRT (primer log distinto al creador)
-    tickets = list(qs.only("id","created_at","updated_at","state","requester_id"))
-    ids = [t.id for t in tickets]
-    logs = TicketLog.objects.filter(ticket_id__in=ids).order_by("created_at") \
-            .values("ticket_id","user_id","created_at")
-
-    first_log = {}
-    for lg in logs:
-        if lg["ticket_id"] not in first_log:
-            first_log[lg["ticket_id"]] = lg["created_at"]
-
-    mttr_sum = mttr_n = frt_sum = frt_n = 0
-    for t in tickets:
-        if t.state in ("resolved","closed") and t.updated_at and t.updated_at > t.created_at:
-            mttr_sum += (t.updated_at - t.created_at).total_seconds(); mttr_n += 1
-        fl = first_log.get(t.id)
-        if fl and fl > t.created_at:
-            frt_sum += (fl - t.created_at).total_seconds(); frt_n += 1
-
-    def to_hours(total, n): return round((total/n)/3600, 2) if n else 0.0
-
-    return Response({
-        **state_counts,
-        "critical": critical,
-        "mttr_hours": to_hours(mttr_sum, mttr_n),
-        "frt_hours": to_hours(frt_sum, frt_n),
-    })
+    qs = apply_ticket_filters(qs, request)
+    service = TicketMetricsService(
+        qs.only("id", "created_at", "requester_id", "priority", "state")
+    )
+    summary = service.summarize()
+    payload = {
+        "total": summary["total"],
+        "by_state": summary["by_state"],
+        "critical": summary["critical"],
+        "mttr_minutes": summary["mttr_minutes"],
+        "frt_minutes": summary["frt_minutes"],
+    }
+    payload.update(summary["by_state"])
+    return Response(payload)
 
 # --- ENDPOINT: /api/reports/export ---
+EXPORT_FORMAT_PARAM = openapi.Parameter(
+    "format",
+    openapi.IN_QUERY,
+    description="Formato de exportación (csv, xlsx o pdf).",
+    type=openapi.TYPE_STRING,
+    required=False,
+)
+
+
+@swagger_auto_schema(method="get", manual_parameters=FILTER_QUERY_PARAMS + [EXPORT_FORMAT_PARAM])
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
 def reports_export(request):
@@ -710,94 +647,94 @@ def reports_export(request):
     qs = Ticket.objects.select_related("category", "assigned_to", "requester")
     if not _is_admin_or_tech(request.user):
         qs = qs.filter(Q(requester=request.user) | Q(assigned_to=request.user))
-    qs = _apply_filters(qs, request).order_by("-created_at")
+    qs = apply_ticket_filters(qs, request).order_by("-created_at")
 
-    # compone filas
-    rows = []
-    for t in qs:
-        rdt = _first_resolution_dt(t)
-        frt = _first_response_dt(t)
-        mttr_h = round(((rdt - t.created_at).total_seconds() / 3600.0), 2) if rdt else ""
-        frt_m = round(((frt - t.created_at).total_seconds() / 60.0), 2) if frt else ""
-        rows.append([
-            t.id,
-            t.title or "",
-            t.state,
-            t.priority,
-            getattr(t.category, "name", "") if t.category_id else "",
-            getattr(t.assigned_to, "username", "") if t.assigned_to_id else "",
-            t.created_at.astimezone(timezone.get_current_timezone()).strftime("%Y-%m-%d %H:%M"),
-            rdt.astimezone(timezone.get_current_timezone()).strftime("%Y-%m-%d %H:%M") if rdt else "",
-            mttr_h,
-            frt_m,
-        ])
+    start_time = perf_counter()
+    service = TicketMetricsService(qs)
+    rows = build_report_rows(service)
+    footer = filters_footer(request.GET)
 
-    # pie con filtros
-    footer = {
-        "from": request.GET.get("from") or "",
-        "to": request.GET.get("to") or "",
-        "category": request.GET.get("category") or "",
-        "assignee": request.GET.get("assignee") or "",
-        "priority": request.GET.get("priority") or "",
-    }
+    headers = [
+        "ID",
+        "Título",
+        "Estado",
+        "Prioridad",
+        "Categoría",
+        "Asignado a",
+        "Creado",
+        "Resuelto",
+        "MTTR(min)",
+        "FRT(min)",
+    ]
 
-    # CSV siempre disponible
+    content_type = None
+    filename = None
+    payload = None
+
     if fmt == "csv":
         buf = io.StringIO()
-        w = csv.writer(buf)
-        w.writerow(["ID","Título","Estado","Prioridad","Categoría","Asignado a","Creado","Resuelto","MTTR(h)","FRT(min)"])
-        for r in rows:
-            w.writerow(r)
-        w.writerow([])
-        w.writerow([f"Parámetros: {footer}"])
-        out = buf.getvalue().encode("utf-8-sig")
-        return Response(out, headers={
-            "Content-Type": "text/csv; charset=utf-8",
-            "Content-Disposition": 'attachment; filename="tickets_report.csv"',
-        })
-
-    # XLSX si openpyxl presente
-    if fmt == "xlsx":
+        writer = csv.writer(buf)
+        writer.writerow(headers)
+        for row in rows:
+            writer.writerow(row)
+        writer.writerow([])
+        writer.writerow([f"Parámetros: {footer}"])
+        payload = buf.getvalue().encode("utf-8-sig")
+        content_type = "text/csv; charset=utf-8"
+        filename = "tickets_report.csv"
+    elif fmt == "xlsx":
         if not openpyxl:
-            return Response({"error":"openpyxl no instalado"}, status=501)
+            return Response({"error": "openpyxl no instalado"}, status=501)
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Reporte"
-        ws.append(["ID","Título","Estado","Prioridad","Categoría","Asignado a","Creado","Resuelto","MTTR(h)","FRT(min)"])
-        for r in rows:
-            ws.append(r)
+        ws.append(headers)
+        for row in rows:
+            ws.append(row)
         ws.append([])
         ws.append([f"Parámetros: {footer}"])
-        b = io.BytesIO(); wb.save(b)
-        return Response(b.getvalue(), headers={
-            "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "Content-Disposition": 'attachment; filename="tickets_report.xlsx"',
-        })
-
-    # PDF simple si reportlab presente
-    if fmt == "pdf":
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        payload = buffer.getvalue()
+        content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        filename = "tickets_report.xlsx"
+    elif fmt == "pdf":
         if not canvas:
-            return Response({"error":"reportlab no instalado"}, status=501)
-        b = io.BytesIO()
-        c = canvas.Canvas(b)
-        c.setFont("Helvetica", 10)
+            return Response({"error": "reportlab no instalado"}, status=501)
+        buffer = io.BytesIO()
+        pdf = canvas.Canvas(buffer)
+        pdf.setFont("Helvetica", 10)
         y = 800
-        c.drawString(40, y, "Reporte de Tickets"); y -= 20
-        c.drawString(40, y, f"Parámetros: {footer}"); y -= 30
-        c.drawString(40, y, "ID  Título  Estado  Prioridad  Categoría  Asignado  Creado  Resuelto  MTTR  FRT"); y -= 15
-        for r in rows[:600]:  # corte simple
-            line = "  ".join(str(x) for x in r[:10])
-            c.drawString(40, y, line[:180]); y -= 12
+        pdf.drawString(40, y, "Reporte de Tickets"); y -= 20
+        pdf.drawString(40, y, f"Parámetros: {footer}"); y -= 30
+        pdf.drawString(
+            40,
+            y,
+            "ID  Título  Estado  Prioridad  Categoría  Asignado  Creado  Resuelto  MTTR  FRT",
+        )
+        y -= 15
+        for row in rows[:600]:
+            line = "  ".join(str(x) for x in row[:10])
+            pdf.drawString(40, y, line[:180])
+            y -= 12
             if y < 60:
-                c.showPage(); y = 800
-                c.setFont("Helvetica", 10)
-        c.showPage(); c.save()
-        return Response(b.getvalue(), headers={
-            "Content-Type": "application/pdf",
-            "Content-Disposition": 'attachment; filename="tickets_report.pdf"',
-        })
+                pdf.showPage()
+                pdf.setFont("Helvetica", 10)
+                y = 800
+        pdf.showPage()
+        pdf.save()
+        payload = buffer.getvalue()
+        content_type = "application/pdf"
+        filename = "tickets_report.pdf"
+    else:
+        return Response({"error": "format inválido (csv|xlsx|pdf)"}, status=400)
 
-    return Response({"error":"format inválido (csv|xlsx|pdf)"}, status=400) 
+    elapsed = perf_counter() - start_time
+    response = Response(payload)
+    response["Content-Type"] = content_type
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response["X-Export-Generation"] = f"{elapsed:.6f}"
+    return response
 
 @login_required
 def metrics_page(request):
