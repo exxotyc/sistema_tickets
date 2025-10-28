@@ -154,35 +154,41 @@ class TicketViewSet(viewsets.ModelViewSet):
         return Response({"status": "assigned", "assigned_to": user.username})
 
 class CommentViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
-    queryset = Comment.objects.select_related("ticket", "user").all().order_by("-created_at")
+    queryset = Comment.objects.select_related("ticket", "user").order_by("created_at")
     serializer_class = CommentSerializer
-    permission_classes = [permissions.IsAuthenticated, IsRequesterOrAssignedOrAdmin]
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ["ticket"]
+    ordering_fields = ["created_at"]
 
     def get_queryset(self):
         qs = super().get_queryset()
         u = self.request.user
-        if _is_adminlike(u):
+        if _is_admin_or_tech(u):
             return qs
         return qs.filter(Q(ticket__requester=u) | Q(ticket__assigned_to=u)).distinct()
 
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
-
+        t = get_object_or_404(Ticket, pk=self.request.data.get("ticket"))
+        u = self.request.user
+        if not (_is_admin_or_tech(u) or t.requester_id == u.id or t.assigned_to_id == u.id):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("No autorizado para comentar este ticket")
+        serializer.save(user=u, ticket=t)
+        
 class AttachmentViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
     queryset = Attachment.objects.select_related("ticket", "user").all().order_by("-created_at")
     serializer_class = AttachmentSerializer
     permission_classes = [permissions.IsAuthenticated, IsRequesterOrAssignedOrAdmin]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ["ticket"]
+    ordering_fields = ["created_at"]
 
     def get_queryset(self):
         qs = super().get_queryset()
         u = self.request.user
-        if _is_adminlike(u):
-            return qs
-        return qs.filter(Q(ticket__requester=u) | Q(ticket__assigned_to=u)).distinct()
-
-    def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+        return qs if _is_admin_or_tech(u) else qs.filter(Q(ticket__requester=u) | Q(ticket__assigned_to=u)).distinct()
 
 class TicketLogViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = TicketLog.objects.select_related("user", "ticket").all().order_by("-created_at")

@@ -35,15 +35,51 @@ class AttachmentSerializer(serializers.ModelSerializer):
 
 
 # ---------- Comments ----------
+
 class CommentSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)
-    # Compatibilidad con frontend usando "content" en lugar de "body"
-    content = serializers.CharField(source="body")
+    user_username = serializers.CharField(source="user.username", read_only=True)
+    # El frontend envía "content". Lo aceptamos como write_only.
+    content = serializers.CharField(write_only=True)
 
     class Meta:
         model = Comment
-        fields = ["id", "ticket", "user", "content", "created_at"]
-        read_only_fields = ["created_at", "user"]
+        fields = ["id", "ticket", "user", "user_username", "created_at", "content"]
+        read_only_fields = ["id", "user", "user_username", "created_at"]
+
+    def _model_content_field_name(self):
+        # Detecta el nombre real del campo de texto en el modelo
+        for name in ("content", "text", "body", "message", "comment"):
+            if hasattr(self.instance or self.Meta.model, name):
+                # hasattr(model) funciona porque Django pone descriptores en la clase
+                return name
+        # Si no encuentra, por lo menos intenta "content"
+        return "content"
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Inyecta "content" para lectura desde el campo real
+        for name in ("content", "text", "body", "message", "comment"):
+            if hasattr(instance, name):
+                data["content"] = getattr(instance, name)
+                break
+        return data
+
+    def create(self, validated_data):
+        # Sacamos el "content" que viene del frontend y lo colocamos en el campo real del modelo
+        raw = validated_data.pop("content")
+        # Construye el objeto con el resto (ticket, user)
+        obj = Comment(**validated_data)
+        target = None
+        for name in ("content", "text", "body", "message", "comment"):
+            if hasattr(obj, name):
+                target = name
+                break
+        if target is None:
+            # Como última opción, crea atributo "content"
+            target = "content"
+        setattr(obj, target, raw)
+        obj.save()
+        return obj
 
 
 # ---------- Tickets ----------

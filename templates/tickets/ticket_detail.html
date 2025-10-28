@@ -172,7 +172,6 @@
 
 {% block extra_js %}
 <script>
-  // apiFetch shim si falta
   if(typeof window.apiFetch!=="function"){
     window.apiFetch = async function(url, opts={}){
       const access = localStorage.getItem("access_token");
@@ -192,7 +191,6 @@
     }
   }
 
-  // Forzar navegación dura en "Volver"
   document.addEventListener("click",(e)=>{
     const a=e.target.closest('a[data-hard-nav="1"]');
     if(!a) return;
@@ -242,49 +240,48 @@
     if(prSel) prSel.value = data.priority || "medium";
   }
 
-  // --- Comentarios ---
-async function loadComments(){
-  // pide solo los del ticket para evitar filtrar en cliente
-  const r = await apiFetch(`/api/comments/?ticket=${TICKET_ID}&ordering=created_at`);
-  if(!r) return;
-  const data = await r.json();
-  const items = data.results || (Array.isArray(data) ? data : []);
-  const ul = document.getElementById("comments");
-  ul.innerHTML = "";
-
-  if(!items.length){
-    ul.innerHTML = '<li class="list-group-item text-muted">Sin comentarios</li>';
-    return;
-  }
-
-  for(const c of items){
-    const who =
-      c.user_username ||
-      (c.user && typeof c.user === "object" && c.user.username) ||
-      (typeof c.user === "number" ? `usuario #${c.user}` : null) ||
-      c.username || "usuario";
-
-    const when = c.created_at || c.created || c.timestamp;
-    const text = c.content ?? c.text ?? "";
-
-    const li = document.createElement("li");
-    li.className = "list-group-item";
-    li.innerHTML = `
-      <div class="d-flex justify-content-between">
-        <strong>${esc(who)}</strong>
-        <small class="text-muted">${fmt(when)}</small>
-      </div>
-      <div>${esc(text)}</div>`;
-    ul.appendChild(li);
-  }
-}
-
-  // --- Adjuntos ---
-  async function loadAttachments(){
-    const r = await apiFetch(`/api/attachments/?ordering=-created_at`);
+  // --- Comentarios (filtrados por ticket) ---
+  async function loadComments(){
+    const r = await apiFetch(`/api/comments/?ticket=${TICKET_ID}&ordering=created_at`);
     if(!r) return;
     const data = await r.json();
-    const items = (data.results||data).filter(a => String(a.ticket)===String(TICKET_ID));
+    const items = data.results || (Array.isArray(data) ? data : []);
+    const ul = document.getElementById("comments");
+    ul.innerHTML = "";
+
+    if(!items.length){
+      ul.innerHTML = '<li class="list-group-item text-muted">Sin comentarios</li>';
+      return;
+    }
+
+    for(const c of items){
+      const who =
+        c.user_username ||
+        (c.user && typeof c.user === "object" && c.user.username) ||
+        (typeof c.user === "number" ? `usuario #${c.user}` : null) ||
+        c.username || "usuario";
+
+      const when = c.created_at || c.created || c.timestamp;
+      const text = c.content ?? c.text ?? "";
+
+      const li = document.createElement("li");
+      li.className = "list-group-item";
+      li.innerHTML = `
+        <div class="d-flex justify-content-between">
+          <strong>${esc(who)}</strong>
+          <small class="text-muted">${fmt(when)}</small>
+        </div>
+        <div>${esc(text)}</div>`;
+      ul.appendChild(li);
+    }
+  }
+
+  // --- Adjuntos (filtrados por ticket) ---
+  async function loadAttachments(){
+    const r = await apiFetch(`/api/attachments/?ticket=${TICKET_ID}&ordering=-created_at`);
+    if(!r) return;
+    const data = await r.json();
+    const items = (data.results || data);
     const ul = document.getElementById("attachments"); ul.innerHTML="";
     if(!items.length){ ul.innerHTML = '<li class="list-group-item text-muted">Sin adjuntos</li>'; return; }
     for(const a of items){
@@ -350,9 +347,9 @@ async function loadComments(){
   // Guardar estado/prioridad
   async function saveMeta(state, priority){
     const ids=["btnSaveMeta","btnStart","btnResolve","btnClose","btnReopen"];
-    ids.forEach(id=>{ const b=document.getElementById(id); if(b) b.disabled=true; });
+    ids.forEach(id=>{ const b=document.getElementById(id); if(b) b && (b.disabled=true); });
     const res = await sendJSON(`/api/tickets/${TICKET_ID}/`, "PATCH", { state, priority });
-    ids.forEach(id=>{ const b=document.getElementById(id); if(b) b.disabled=false; });
+    ids.forEach(id=>{ const b=document.getElementById(id); if(b) b && (b.disabled=false); });
     if(!res.ok){ alert("Actualizar: "+res.error); return false; }
     await loadTicket(); return true;
   }
@@ -366,7 +363,7 @@ async function loadComments(){
   document.getElementById("btnClose").addEventListener("click", async ()=>{ await saveMeta("closed", document.getElementById("prioSelect").value); });
   document.getElementById("btnReopen").addEventListener("click", async ()=>{ await saveMeta("open", document.getElementById("prioSelect").value); });
 
-  // --- Comentarios / Adjuntos ---
+  // --- Envío comentario / adjunto ---
   document.getElementById("frmComment").addEventListener("submit", async (e)=>{
     e.preventDefault();
     const txt = document.getElementById("commentText");
