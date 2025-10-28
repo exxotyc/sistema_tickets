@@ -138,5 +138,3 @@ def notify_sla_risk(ticket, due_at) -> bool:
         },
         key_suffix=suffix,
     )
-
-*** End
