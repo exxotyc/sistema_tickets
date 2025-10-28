@@ -1,6 +1,10 @@
 # tickets/serializers.py
+import hashlib
+import mimetypes
+
 from rest_framework import serializers
 from django.contrib.auth.models import User
+
 from .models import Ticket, Comment, Attachment, TicketLog, Category
 
 # ---------- Users ----------
@@ -19,7 +23,7 @@ class CategorySerializer(serializers.ModelSerializer):
 
 
 # ---------- Attachments ----------
-class AttachmentSerializer(serializers.ModelSerializer):
+class TicketAttachmentSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
     filename = serializers.CharField(source="file.name", read_only=True)
 
@@ -32,6 +36,39 @@ class AttachmentSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "user", "mime", "size_bytes", "sha256", "created_at", "filename"
         ]
+
+    def _guess_mime(self, uploaded_file):
+        if hasattr(uploaded_file, "content_type") and uploaded_file.content_type:
+            return uploaded_file.content_type
+        guessed, _ = mimetypes.guess_type(uploaded_file.name)
+        return guessed or ""
+
+    def _compute_sha256(self, uploaded_file):
+        hasher = hashlib.sha256()
+        position = None
+        if hasattr(uploaded_file, "tell") and hasattr(uploaded_file, "seek"):
+            try:
+                position = uploaded_file.tell()
+            except (OSError, AttributeError):
+                position = None
+        for chunk in uploaded_file.chunks():
+            hasher.update(chunk)
+        if hasattr(uploaded_file, "seek"):
+            uploaded_file.seek(position or 0)
+        return hasher.hexdigest()
+
+    def create(self, validated_data):
+        uploaded_file = validated_data.get("file")
+        if uploaded_file is not None:
+            validated_data["size_bytes"] = getattr(uploaded_file, "size", None)
+            validated_data["mime"] = self._guess_mime(uploaded_file)
+            validated_data["sha256"] = self._compute_sha256(uploaded_file)
+        request = self.context.get("request")
+        user = getattr(request, "user", None) if request else None
+        if user and user.is_authenticated:
+            validated_data.setdefault("user", user)
+        attachment = Attachment.objects.create(**validated_data)
+        return attachment
 
 
 # ---------- Comments ----------
@@ -81,15 +118,6 @@ class CommentSerializer(serializers.ModelSerializer):
         obj.save()
         return obj
 
-
-# ---------- Tickets ----------
-# Matriz de transiciones de estado permitidas
-ALLOWED_TRANSITIONS = {
-    "open": {"in_progress"},
-    "in_progress": {"open", "resolved"},
-    "resolved": {"in_progress", "closed"},
-    "closed": set(),
-}
 
 class TicketSerializer(serializers.ModelSerializer):
     # Campos relacionadas escribibles (PKs)
@@ -146,27 +174,29 @@ class TicketSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
-        """
-        Valida las transiciones de estado según los permisos del usuario
-        """
+        """Valida las transiciones de estado según los permisos del usuario"""
         instance = getattr(self, "instance", None)
         new_state = attrs.get("state")
-        
-        # Si no hay instancia, nuevo estado, o el estado no cambia, no validar
-        if not instance or not new_state or new_state == instance.state:
+
+        if not instance or new_state is None or new_state == instance.state:
             return attrs
 
-        # Obtener usuario del contexto
         request = self.context.get("request")
         user = getattr(request, "user", None) if request else None
-        
-        # Usuarios admin-like pueden saltarse las restricciones
-        is_admin_like = self._is_admin_like_user(user)
-        if is_admin_like:
+
+        if self._is_admin_like_user(user):
             return attrs
 
-        # Validar transición para usuarios normales
-        self._validate_state_transition(instance.state, new_state)
+        if not instance.can_transition_to(new_state):
+            allowed = instance.STATE_TRANSITIONS.get(instance.state, set())
+            allowed_display = ", ".join(sorted(allowed)) or "ninguna"
+            raise serializers.ValidationError({
+                "state": (
+                    f"Transición inválida {instance.state} → {new_state}. "
+                    f"Transiciones permitidas: {allowed_display}"
+                )
+            })
+
         return attrs
 
     def _is_admin_like_user(self, user):
@@ -178,22 +208,30 @@ class TicketSerializer(serializers.ModelSerializer):
             name__in=["admin", "tecnico"]
         ).exists()
 
-    def _validate_state_transition(self, current_state, new_state):
-        """Valida si la transición de estado está permitida"""
-        allowed_next_states = ALLOWED_TRANSITIONS.get(current_state, set())
-        
-        if new_state not in allowed_next_states:
-            raise serializers.ValidationError({
-                "state": f"Transición inválida {current_state} → {new_state}. "
-                        f"Transiciones permitidas: {', '.join(allowed_next_states) or 'ninguna'}"
-            })
-
     def create(self, validated_data):
         """Crea un nuevo ticket (requester se establece en perform_create de la vista)"""
         return Ticket.objects.create(**validated_data)
 
     def update(self, instance, validated_data):
         """Actualiza el ticket"""
+        request = self.context.get("request")
+        user = getattr(request, "user", None) if request else None
+
+        new_state = validated_data.pop("state", None)
+        if new_state is not None:
+            force = self._is_admin_like_user(user)
+            try:
+                instance.change_state(new_state, by=user, force=force)
+            except Ticket.InvalidStateTransition as exc:
+                allowed = instance.STATE_TRANSITIONS.get(exc.current_state, set())
+                allowed_display = ", ".join(sorted(allowed)) or "ninguna"
+                raise serializers.ValidationError({
+                    "state": (
+                        f"Transición inválida {exc.current_state} → {exc.new_state}. "
+                        f"Transiciones permitidas: {allowed_display}"
+                    )
+                })
+
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()

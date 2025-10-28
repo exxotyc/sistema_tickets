@@ -1,11 +1,26 @@
 from django.contrib import admin
 from .models import Ticket, Category, Comment, Attachment, TicketLog, Section
 
+
+class CommentInline(admin.TabularInline):
+    model = Comment
+    extra = 0
+    readonly_fields = ("user", "body", "created_at")
+
+
+class AttachmentInline(admin.TabularInline):
+    model = Attachment
+    extra = 0
+    readonly_fields = ("user", "file", "mime", "size_bytes", "sha256", "created_at")
+
+
 @admin.register(Ticket)
 class TicketAdmin(admin.ModelAdmin):
-    list_display = ("id","title","state","priority","requester","assigned_to","updated_at")
-    list_filter = ("state","priority","category","assigned_to")
-    search_fields = ("title","description")
+    list_display = ("id", "title", "state", "priority", "requester", "assigned_to", "updated_at")
+    list_filter = ("state", "priority", "assigned_to", "category")
+    search_fields = ("title", "description")
+    inlines = [CommentInline, AttachmentInline]
+
 
 admin.site.register([Category, Comment, Attachment, TicketLog])
 
