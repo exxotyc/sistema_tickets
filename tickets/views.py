@@ -49,10 +49,10 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import Ticket, Category, TicketLog, Comment, Attachment, Section
-from .permissions import IsRequesterOrAssignedOrAdmin
+from .permissions import IsTicketActorOrAdmin
 from .serializers import (
     TicketSerializer, CategorySerializer, TicketLogSerializer,
-    CommentSerializer, AttachmentSerializer,
+    CommentSerializer, TicketAttachmentSerializer,
 )
 
 # ==================== Helpers ====================
@@ -114,7 +114,7 @@ class CategoryViewSet(viewsets.ModelViewSet):
 class TicketViewSet(viewsets.ModelViewSet):
     queryset = Ticket.objects.select_related("requester", "assigned_to", "category").all().order_by("-created_at")
     serializer_class = TicketSerializer
-    permission_classes = [IsRequesterOrAssignedOrAdmin]
+    permission_classes = [IsTicketActorOrAdmin]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter, DjangoFilterBackend]
     search_fields = ["title", "description"]
@@ -178,8 +178,8 @@ class CommentViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets.Ge
         
 class AttachmentViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
     queryset = Attachment.objects.select_related("ticket", "user").all().order_by("-created_at")
-    serializer_class = AttachmentSerializer
-    permission_classes = [permissions.IsAuthenticated, IsRequesterOrAssignedOrAdmin]
+    serializer_class = TicketAttachmentSerializer
+    permission_classes = [IsTicketActorOrAdmin]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ["ticket"]
