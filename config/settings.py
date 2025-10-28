@@ -140,3 +140,12 @@ SLA_MATRIX = {
     "critical": {"frt_min": 30,  "res_h": 8},
 }
 SLA_AT_RISK_MARGIN = 0.2  # 20% del tiempo restante
+
+TICKET_NOTIFICATIONS = {
+    "emails": [addr for addr in os.getenv("TICKET_NOTIFICATION_EMAILS", "").split(",") if addr],
+    "webhook_url": os.getenv("TICKET_NOTIFICATION_WEBHOOK", ""),
+    "dedup_seconds": int(os.getenv("TICKET_NOTIFICATION_DEDUP_SECONDS", "300") or 0),
+}
+
+CRONJOBS = list(locals().get("CRONJOBS", []))
+CRONJOBS.append(("*/30 * * * *", "django.core.management.call_command", ["recalculate_sla"]))

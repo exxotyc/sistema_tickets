@@ -1,3 +1,5 @@
+import logging
+
 from django.db import models
 from django.contrib.auth.models import User, Group
 
@@ -33,6 +35,9 @@ class Ticket(models.Model):
     attachment = models.FileField(upload_to="attachments/%Y/%m/", null=True, blank=True)  # <- así
     frt_due_at = models.DateTimeField(null=True, blank=True)       # vencimiento 1ª respuesta
     resolve_due_at = models.DateTimeField(null=True, blank=True)   # vencimiento resolución
+    sla_minutes = models.PositiveIntegerField(null=True, blank=True)
+    due_at = models.DateTimeField(null=True, blank=True)
+    breach_risk = models.BooleanField(default=False)
 
     STATE_TRANSITIONS = {
         "open": {"in_progress"},
@@ -100,6 +105,20 @@ class Ticket(models.Model):
                 action="state_change",
                 meta_json={"from": state_from, "to": state_to},
             )
+            try:
+                from .notifications import notify_ticket_state_change
+
+                notify_ticket_state_change(
+                    self,
+                    state_from,
+                    state_to,
+                    context.get("user") if context else None,
+                )
+            except Exception:
+                # Las notificaciones no deben impedir el guardado del ticket.
+                logging.getLogger("tickets.notifications").exception(
+                    "Fallo al enviar notificación de cambio de estado"
+                )
 
         if hasattr(self, "_state_change_context"):
             self._state_change_context = None
@@ -145,12 +164,3 @@ class Section(models.Model):
 
     def __str__(self):
         return self.title
-    
-
-    # añade estos campos (luego makemigrations/migrate)
-frt_due_at = models.DateTimeField(null=True, blank=True)
-resolve_due_at = models.DateTimeField(null=True, blank=True)
-frt_met = models.BooleanField(null=True, blank=True)       # True, False, o None si aún no aplica
-resolve_met = models.BooleanField(null=True, blank=True)
-frt_breached_at = models.DateTimeField(null=True, blank=True)
-resolve_breached_at = models.DateTimeField(null=True, blank=True)

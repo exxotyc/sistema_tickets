@@ -138,19 +138,41 @@ class TicketViewSet(viewsets.ModelViewSet):
         if not _is_adminlike(request.user):
             return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
         ticket = self.get_object()
+        previous = ticket.assigned_to
         user_id = request.data.get("user_id")
         try:
             user = UserModel.objects.get(pk=user_id)
         except UserModel.DoesNotExist:
             return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
-        ticket.assigned_to = user
-        ticket.save()
-        TicketLog.objects.create(
-            ticket=ticket,
-            user=request.user,
-            action="reassigned",
-            meta_json={"to": user.id, "username": user.username},
-        )
+        reason = request.data.get("reason") or request.data.get("assignment_reason")
+        if previous != user:
+            ticket.assigned_to = user
+            ticket.save(update_fields=["assigned_to"])
+            meta = {
+                "from": previous.id if previous else None,
+                "to": user.id if user else None,
+                "username": user.username if user else None,
+            }
+            if reason is not None:
+                meta["reason"] = reason
+            TicketLog.objects.create(
+                ticket=ticket,
+                user=request.user,
+                action="reassigned",
+                meta_json=meta,
+            )
+        elif reason is not None:
+            TicketLog.objects.create(
+                ticket=ticket,
+                user=request.user,
+                action="reassigned",
+                meta_json={
+                    "from": previous.id if previous else None,
+                    "to": user.id if user else None,
+                    "username": user.username if user else None,
+                    "reason": reason,
+                },
+            )
         return Response({"status": "assigned", "assigned_to": user.username})
 
 class CommentViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
