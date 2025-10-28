@@ -116,4 +116,3 @@ def refresh_ticket_sla(ticket: Ticket, *, reference=None, persist: bool = True) 
 
     return updates
 
-*** End
