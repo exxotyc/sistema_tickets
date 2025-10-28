@@ -122,9 +122,15 @@ class CommentSerializer(serializers.ModelSerializer):
 class TicketSerializer(serializers.ModelSerializer):
     # Campos relacionadas escribibles (PKs)
     assigned_to = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.all(), 
-        required=False, 
+        queryset=User.objects.all(),
+        required=False,
         allow_null=True
+    )
+    assignment_reason = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+        allow_null=True,
     )
     category = serializers.PrimaryKeyRelatedField(
         queryset=Category.objects.all()
@@ -155,13 +161,17 @@ class TicketSerializer(serializers.ModelSerializer):
             "requester",              # RO - se establece en la vista
             "requester_username",     # RO
             "assigned_to",            # RW (admin/técnico puede cambiar)
+            "assignment_reason",
             "assigned_to_username",   # RO
             "category",               # RW
             "category_name",          # RO
             "created_at",
             "updated_at",
-             "frt_due_at", 
-             "resolve_due_at",
+            "frt_due_at",
+            "resolve_due_at",
+            "sla_minutes",
+            "due_at",
+            "breach_risk",
         ]
         read_only_fields = [
             "id",
@@ -171,6 +181,9 @@ class TicketSerializer(serializers.ModelSerializer):
             "category_name",
             "created_at",
             "updated_at",
+            "sla_minutes",
+            "due_at",
+            "breach_risk",
         ]
 
     def validate(self, attrs):
@@ -232,9 +245,34 @@ class TicketSerializer(serializers.ModelSerializer):
                     )
                 })
 
+        assignment_reason = validated_data.pop("assignment_reason", None)
+        new_assignee = validated_data.pop("assigned_to", serializers.empty)
+        previous_assignee = instance.assigned_to
+        assignment_changed = False
+
+        if new_assignee is not serializers.empty:
+            instance.assigned_to = new_assignee
+            assignment_changed = new_assignee != previous_assignee
+
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
+
+        if assignment_changed:
+            meta = {
+                "from": previous_assignee.id if previous_assignee else None,
+                "to": instance.assigned_to.id if instance.assigned_to else None,
+                "username": instance.assigned_to.username if instance.assigned_to else None,
+            }
+            if assignment_reason is not None:
+                meta["reason"] = assignment_reason
+            TicketLog.objects.create(
+                ticket=instance,
+                user=user if user and user.is_authenticated else None,
+                action="reassigned",
+                meta_json=meta,
+            )
+
         return instance
 
 
