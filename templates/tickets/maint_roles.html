@@ -68,7 +68,7 @@
 </div>
 
 {# Embed seguro de roles sin json_script: JSON en data-attribute #}
-<div id="rolesMapSrc" data-rolesmap='{{ roles_map|escapejs }}' hidden></div>
+<div id="rolesMapSrc" data-rolesmap='{{ roles_map_json|escapejs }}' hidden></div>
 {% endblock %}
 
 {% block extra_js %}
