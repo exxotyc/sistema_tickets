@@ -110,12 +110,10 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_CLASSES": (
         "rest_framework.throttling.UserRateThrottle",
         "rest_framework.throttling.AnonRateThrottle",
-        "rest_framework.throttling.ScopedRateThrottle",
     ),
     "DEFAULT_THROTTLE_RATES": {
-        "user": "1000/day",
-        "anon": "100/day",
-        "assets": "120/hour",
+        "user": os.getenv("API_USER_RATE", "1000/day"),
+        "anon": os.getenv("API_ANON_RATE", "100/day"),
     },
 }
 
@@ -161,13 +159,13 @@ TICKET_NOTIFICATIONS = {
 CRONJOBS = list(locals().get("CRONJOBS", []))
 CRONJOBS.append(("*/30 * * * *", "django.core.management.call_command", ["recalculate_sla"]))
 
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
         "verbose": {
-            "format": "{levelname} {asctime} {name} {message}",
-            "style": "{",
+            "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         }
     },
     "handlers": {
@@ -179,7 +177,15 @@ LOGGING = {
     "loggers": {
         "tickets.access": {
             "handlers": ["console"],
-            "level": os.getenv("ACCESS_LOG_LEVEL", "INFO"),
+            "level": "INFO",
+        },
+        "tickets.notifications": {
+            "handlers": ["console"],
+            "level": "INFO",
+        },
+        "tickets.security": {
+            "handlers": ["console"],
+            "level": "WARNING",
         },
     },
 }

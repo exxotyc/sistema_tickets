@@ -1,23 +1,33 @@
+"""Custom middleware utilities for observability and hardening."""
+from __future__ import annotations
+
 import logging
-from datetime import datetime
+from typing import Callable
 
-from django.utils.deprecation import MiddlewareMixin
+from django.utils import timezone
 
 
-class AccessLogMiddleware(MiddlewareMixin):
-    logger = logging.getLogger("tickets.access")
+access_logger = logging.getLogger("tickets.access")
 
-    def process_response(self, request, response):
+
+class AccessLogMiddleware:
+    """Log every incoming request once it has been processed."""
+
+    def __init__(self, get_response: Callable):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
         user = getattr(request, "user", None)
-        username = getattr(user, "username", None) if user and user.is_authenticated else "anon"
-        ip = request.META.get("REMOTE_ADDR") if hasattr(request, "META") else None
-        self.logger.info(
+        username = getattr(user, "username", "anon") if getattr(user, "is_authenticated", False) else "anon"
+        access_logger.info(
             "method=%s path=%s status=%s user=%s ip=%s ts=%s",
             request.method,
-            request.get_full_path() if hasattr(request, "get_full_path") else getattr(request, "path", ""),
-            response.status_code,
+            request.path,
+            getattr(response, "status_code", "?"),
             username,
-            ip,
-            datetime.utcnow().isoformat(),
+            request.META.get("REMOTE_ADDR", ""),
+            timezone.now().isoformat(),
         )
         return response
+

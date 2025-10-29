@@ -9,8 +9,8 @@ from . import views
 from .views import (
     TicketViewSet,
     CategoryViewSet,
-    TicketLogViewSet,
     FAQViewSet,
+    TicketLogViewSet,
     MyTokenObtainPairView,
     UserReadOnlyViewSet,
     stats,
@@ -22,6 +22,7 @@ from .views import (
 router = routers.DefaultRouter()
 router.register(r"tickets", TicketViewSet, basename="tickets")
 router.register(r"categories", CategoryViewSet, basename="categories")
+router.register(r"faqs", FAQViewSet, basename="faqs")
 router.register(r"logs", TicketLogViewSet, basename="logs")
 router.register(r"faqs", FAQViewSet, basename="faqs")
 router.register(r"users", UserReadOnlyViewSet, basename="users")
@@ -49,6 +50,9 @@ web_urlpatterns = [
     path("", views.index, name="index"),
     path("dashboard/", views.dashboard, name="dashboard"),
     path("listado/", views.ticket_list, name="ticket_list"),
+    path("faq/", views.faq_page, name="faq"),
+    path("faq/<int:pk>/unresolved/", views.faq_unresolved, name="faq_unresolved"),
+    path("assets/<slug:asset_id>/", views.asset_history_page, name="asset_history"),
 
     # creación y detalle
     path("tickets/new/", views.ticket_new, name="ticket_new"),

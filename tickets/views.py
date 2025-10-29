@@ -4,6 +4,7 @@ from time import perf_counter
 import re
 import json
 
+from django.contrib import messages
 from django.contrib.auth import get_user_model, logout
 from django.contrib.auth.models import Group
 from django.contrib.auth.decorators import login_required, user_passes_test
@@ -11,6 +12,7 @@ from django.db.models import Q, Count
 from django.utils.timezone import now
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import Http404, HttpResponseForbidden, JsonResponse
+from django.urls import reverse
 from django.template.response import TemplateResponse
 from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.csrf import csrf_exempt
@@ -21,6 +23,8 @@ from django.db.models import Min
 from datetime import datetime, time
 from django.utils.timezone import make_aware, get_current_timezone
 from django.db.models import Count, Q
+from urllib.parse import urlencode
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework import permissions
 from rest_framework.response import Response
 import io, csv
@@ -77,6 +81,7 @@ from .serializers import (
     FAQSerializer,
 )
 from .reports import build_report_rows, filters_footer
+from .services.assets import build_asset_history
 from .services.metrics import TicketMetricsService
 
 # ==================== Helpers ====================
@@ -136,54 +141,21 @@ class CategoryViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
 
-class FAQViewSet(viewsets.ModelViewSet):
-    queryset = FAQ.objects.select_related("category").prefetch_related("feedback")
+class FAQViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
+    queryset = FAQ.objects.filter(is_active=True).select_related("category").order_by("question")
     serializer_class = FAQSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [filters.SearchFilter, DjangoFilterBackend, filters.OrderingFilter]
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ["category"]
     search_fields = ["question", "answer"]
-    filterset_fields = ["category", "is_active"]
-    ordering_fields = ["created_at", "updated_at", "question"]
 
-    def get_queryset(self):
-        qs = super().get_queryset()
-        if _is_admin_or_tech(self.request.user):
-            return qs
-        return qs.filter(is_active=True)
-
-    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
-    def mark_unresolved(self, request, pk=None):
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticatedOrReadOnly])
+    def unresolved(self, request, pk=None):
         faq = self.get_object()
-        comment = request.data.get("comment", "")
-        FAQFeedback.objects.create(
-            faq=faq,
-            user=request.user if request.user.is_authenticated else None,
-            comment=comment,
-        )
-        TicketLog.objects.create(
-            ticket=None,
-            user=request.user if request.user.is_authenticated else None,
-            action="faq.unresolved",
-            meta_json={"faq_id": faq.id, "question": faq.question, "comment": comment},
-            is_critical=False,
-        )
-        return Response({"ok": True, "unresolved": faq.feedback.count()})
-
-    @action(detail=False, methods=["get"], permission_classes=[permissions.IsAuthenticated])
-    def metrics(self, request):
-        qs = self.filter_queryset(self.get_queryset())
-        unresolved_qs = FAQFeedback.objects.filter(faq__in=qs)
-        metrics = {
-            "total_faqs": qs.count(),
-            "unresolved_events": unresolved_qs.count(),
-            "by_faq": list(
-                unresolved_qs.values("faq_id").annotate(total=Count("id")).order_by("-total")
-            ),
-            "by_category": list(
-                unresolved_qs.values("faq__category_id").annotate(total=Count("id")).order_by("-total")
-            ),
-        }
-        return Response(metrics)
+        comment = (request.data.get("comment") or "").strip()
+        user = request.user if request.user.is_authenticated else None
+        feedback = _record_faq_unresolved(faq, user, comment)
+        return Response({"status": "recorded", "feedback_id": feedback.pk})
 
 
 class TicketViewSet(viewsets.ModelViewSet):
@@ -998,6 +970,168 @@ def reports_export(request):
     response["X-Export-Generation"] = f"{elapsed:.6f}"
     return response
 
+
+# --- ENDPOINT: /api/assets/{asset_id}/tickets ---
+ASSET_RULE_PARAMS = [
+    openapi.Parameter(
+        "n",
+        openapi.IN_QUERY,
+        description="Cantidad de incidentes que gatilla la alerta.",
+        type=openapi.TYPE_INTEGER,
+        required=False,
+    ),
+    openapi.Parameter(
+        "m",
+        openapi.IN_QUERY,
+        description="Ventana en meses a considerar para la regla.",
+        type=openapi.TYPE_INTEGER,
+        required=False,
+    ),
+    openapi.Parameter(
+        "format",
+        openapi.IN_QUERY,
+        description="Formato opcional (csv o pdf) para exportar la vista.",
+        type=openapi.TYPE_STRING,
+        required=False,
+    ),
+]
+
+
+def _serialize_asset_ticket(ticket):
+    tz = timezone.get_current_timezone()
+    created = timezone.localtime(ticket.created_at, tz).strftime("%Y-%m-%d %H:%M")
+    updated = timezone.localtime(ticket.updated_at, tz).strftime("%Y-%m-%d %H:%M")
+    return {
+        "id": ticket.id,
+        "title": ticket.title,
+        "state": ticket.state,
+        "priority": ticket.priority,
+        "category": getattr(ticket.category, "name", ""),
+        "assigned_to": getattr(ticket.assigned_to, "username", ""),
+        "created_at": created,
+        "updated_at": updated,
+        "breach_risk": ticket.breach_risk,
+    }
+
+
+def _asset_rows(history):
+    rows = []
+    for ticket in history.tickets:
+        data = _serialize_asset_ticket(ticket)
+        rows.append([
+            data["id"],
+            data["title"],
+            data["state"],
+            data["priority"],
+            data["category"],
+            data["assigned_to"],
+            data["created_at"],
+            data["updated_at"],
+            "Sí" if data["breach_risk"] else "No",
+        ])
+    return rows
+
+
+def _record_faq_unresolved(faq, user, comment: str):
+    feedback = FAQFeedback.objects.create(faq=faq, user=user, comment=comment)
+    TicketLog.objects.create(
+        ticket=None,
+        user=user,
+        action="faq.unresolved",
+        is_critical=True,
+        meta_json={"faq_id": faq.pk, "comment": comment},
+    )
+    return feedback
+
+
+@swagger_auto_schema(method="get", manual_parameters=ASSET_RULE_PARAMS)
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def asset_ticket_history(request, asset_id: str):
+    qs = Ticket.objects.select_related("category", "assigned_to").filter(asset_id=asset_id)
+    qs = apply_ticket_filters(qs, request)
+    tickets = list(qs.order_by("-created_at"))
+
+    history = build_asset_history(
+        asset_id=asset_id,
+        queryset=tickets,
+        rule_n=request.GET.get("n"),
+        rule_m=request.GET.get("m"),
+    )
+
+    fmt = (request.GET.get("format") or "json").lower()
+    rule_payload = {
+        "n": history.threshold_count,
+        "m": history.threshold_months,
+        "triggered": history.rule_triggered,
+        "window_start": history.period_start.isoformat() if history.period_start else None,
+        "window_end": history.period_end.isoformat(),
+        "current_window_total": len(history.within_threshold_period),
+    }
+
+    if fmt == "json":
+        return Response(
+            {
+                "asset_id": asset_id,
+                "total": history.total,
+                "rule": rule_payload,
+                "results": [_serialize_asset_ticket(t) for t in history.tickets],
+            }
+        )
+
+    headers = [
+        "ID",
+        "Título",
+        "Estado",
+        "Prioridad",
+        "Categoría",
+        "Asignado",
+        "Creado",
+        "Actualizado",
+        "Riesgo SLA",
+    ]
+
+    if fmt == "csv":
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(headers)
+        for row in _asset_rows(history):
+            writer.writerow(row)
+        writer.writerow([])
+        writer.writerow([f"Regla: {rule_payload}"])
+        payload = buffer.getvalue().encode("utf-8-sig")
+        response = Response(payload)
+        response["Content-Type"] = "text/csv; charset=utf-8"
+        response["Content-Disposition"] = f'attachment; filename="asset_{asset_id}_tickets.csv"'
+        return response
+
+    if fmt == "pdf":
+        if not canvas:
+            return Response({"error": "reportlab no instalado"}, status=501)
+        buffer = io.BytesIO()
+        pdf = canvas.Canvas(buffer)
+        pdf.setFont("Helvetica", 10)
+        pdf.drawString(40, 800, f"Historial de activo {asset_id}")
+        pdf.drawString(40, 780, f"Regla: {rule_payload}")
+        y = 750
+        for row in _asset_rows(history):
+            line = "  ".join(str(value) for value in row)
+            pdf.drawString(40, y, line[:180])
+            y -= 14
+            if y < 60:
+                pdf.showPage()
+                pdf.setFont("Helvetica", 10)
+                y = 800
+        pdf.showPage()
+        pdf.save()
+        payload = buffer.getvalue()
+        response = Response(payload)
+        response["Content-Type"] = "application/pdf"
+        response["Content-Disposition"] = f'attachment; filename="asset_{asset_id}_tickets.pdf"'
+        return response
+
+    return Response({"error": "format inválido (json|csv|pdf)"}, status=400)
+
 @login_required
 def metrics_page(request):
     User = get_user_model()
@@ -1016,3 +1150,75 @@ def metrics_page(request):
             "categories": categories # para el filtro de categoría
         },
     )
+
+
+def faq_page(request):
+    query = (request.GET.get("q") or "").strip()
+    category_param = (request.GET.get("category") or "").strip()
+    faqs = FAQ.objects.filter(is_active=True).select_related("category")
+    if query:
+        faqs = faqs.filter(Q(question__icontains=query) | Q(answer__icontains=query))
+    if category_param:
+        if category_param.isdigit():
+            faqs = faqs.filter(category_id=int(category_param))
+        else:
+            faqs = faqs.filter(category__name__iexact=category_param)
+    faqs = faqs.order_by("question")
+
+    categories = Category.objects.order_by("name")
+    ctx = {
+        "query": query,
+        "selected_category": category_param,
+        "faqs": faqs,
+        "categories": categories,
+        "query_params": request.GET,
+    }
+    return _render(request, "tickets/faq.html", ctx)
+
+
+@require_POST
+def faq_unresolved(request, pk: int):
+    faq = get_object_or_404(FAQ, pk=pk, is_active=True)
+    comment = (request.POST.get("comment") or "").strip()
+    user = request.user if request.user.is_authenticated else None
+    _record_faq_unresolved(faq, user, comment)
+    messages.info(request, "Registramos que el artículo no resolvió tu problema.")
+    params = {}
+    for key in ("q", "category"):
+        value = request.POST.get(key)
+        if value:
+            params[key] = value
+    target = reverse("faq")
+    if params:
+        target = f"{target}?{urlencode(params)}"
+    return redirect(target)
+
+
+@login_required
+def asset_history_page(request, asset_id: str):
+    qs = Ticket.objects.select_related("category", "assigned_to").filter(asset_id=asset_id)
+    qs = apply_ticket_filters(qs, request)
+    tickets = list(qs.order_by("-created_at"))
+    history = build_asset_history(
+        asset_id=asset_id,
+        queryset=tickets,
+        rule_n=request.GET.get("n"),
+        rule_m=request.GET.get("m"),
+    )
+
+    rule_info = {
+        "n": history.threshold_count,
+        "m": history.threshold_months,
+        "triggered": history.rule_triggered,
+        "window_start": history.period_start,
+        "window_end": history.period_end,
+        "current_window_total": len(history.within_threshold_period),
+    }
+
+    ctx = {
+        "asset_id": asset_id,
+        "rule": rule_info,
+        "tickets": [_serialize_asset_ticket(t) for t in history.tickets],
+        "query_params": request.GET,
+    }
+    return _render(request, "tickets/asset_history.html", ctx)

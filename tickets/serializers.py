@@ -5,14 +5,7 @@ import mimetypes
 from rest_framework import serializers
 from django.contrib.auth.models import User
 
-from .models import (
-    Ticket,
-    Comment,
-    Attachment,
-    TicketLog,
-    Category,
-    FAQ,
-)
+from .models import Ticket, Comment, Attachment, TicketLog, Category, FAQ
 
 # ---------- Users ----------
 class UserSerializer(serializers.ModelSerializer):
@@ -124,6 +117,27 @@ class CommentSerializer(serializers.ModelSerializer):
         setattr(obj, target, raw)
         obj.save()
         return obj
+
+
+# ---------- FAQs ----------
+
+
+class FAQSerializer(serializers.ModelSerializer):
+    category_name = serializers.CharField(source="category.name", read_only=True)
+
+    class Meta:
+        model = FAQ
+        fields = [
+            "id",
+            "category",
+            "category_name",
+            "question",
+            "answer",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["created_at", "updated_at"]
 
 
 class TicketSerializer(serializers.ModelSerializer):
