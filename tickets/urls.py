@@ -22,7 +22,6 @@ from .views import (
 router = routers.DefaultRouter()
 router.register(r"tickets", TicketViewSet, basename="tickets")
 router.register(r"categories", CategoryViewSet, basename="categories")
-router.register(r"faqs", FAQViewSet, basename="faqs")
 router.register(r"logs", TicketLogViewSet, basename="logs")
 router.register(r"faqs", FAQViewSet, basename="faqs")
 router.register(r"users", UserReadOnlyViewSet, basename="users")
