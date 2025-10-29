@@ -13,7 +13,7 @@ def ensure_asset_id_column(apps, schema_editor):
     if "asset_id" in existing_columns:
         return
 
-    field = models.CharField(max_length=64, null=True, blank=True, db_index=True)
+    field = models.CharField(max_length=120, null=True, blank=True, db_index=True)
     field.set_attributes_from_name("asset_id")
     schema_editor.add_field(Ticket, field)
 
