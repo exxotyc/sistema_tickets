@@ -1,5 +1,7 @@
 from django.contrib import admin
-from .models import Ticket, Category, Comment, Attachment, TicketLog, Section
+from django.contrib import admin
+
+from .models import Ticket, Category, Comment, Attachment, TicketLog, Section, FAQ, FAQFeedback
 
 
 class CommentInline(admin.TabularInline):
@@ -18,11 +20,18 @@ class AttachmentInline(admin.TabularInline):
 class TicketAdmin(admin.ModelAdmin):
     list_display = ("id", "title", "state", "priority", "requester", "assigned_to", "updated_at")
     list_filter = ("state", "priority", "assigned_to", "category")
-    search_fields = ("title", "description")
+    search_fields = ("title", "description", "asset_id")
     inlines = [CommentInline, AttachmentInline]
 
 
-admin.site.register([Category, Comment, Attachment, TicketLog])
+admin.site.register([Category, Comment, Attachment, TicketLog, FAQFeedback])
+
+
+@admin.register(FAQ)
+class FAQAdmin(admin.ModelAdmin):
+    list_display = ("question", "category", "is_active", "updated_at")
+    list_filter = ("is_active", "category")
+    search_fields = ("question", "answer")
 
 @admin.register(Section)
 class SectionAdmin(admin.ModelAdmin):

@@ -1,0 +1,66 @@
+{% extends "tickets/base.html" %}
+{% block title %}Historial de activo {{ asset_id }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">Historial del activo {{ asset_id }}</h1>
+    <div class="btn-group" role="group">
+      <a class="btn btn-outline-secondary" href="{% url 'api:asset_ticket_history' asset_id %}?format=csv">Descargar CSV</a>
+      <a class="btn btn-outline-secondary" href="{% url 'api:asset_ticket_history' asset_id %}?format=pdf">Descargar PDF</a>
+      <a class="btn btn-primary" href="{% url 'ticket_new' %}?asset_id={{ asset_id }}">Crear ticket</a>
+    </div>
+  </div>
+
+  <div class="alert {% if rule.triggered %}alert-danger{% else %}alert-info{% endif %}">
+    <strong>Regla N/M:</strong>
+    {% if rule.n and rule.m %}
+      {{ rule.current_window_total }} incidentes en los últimos {{ rule.m }} meses (límite: {{ rule.n }}).
+      {% if rule.triggered %}Se requiere revisión del activo.{% endif %}
+    {% else %}
+      Configura parámetros N y M para evaluar la regla desde el panel de filtros.
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card-body">
+      {% if tickets %}
+      <div class="table-responsive">
+        <table class="table table-hover align-middle">
+          <thead class="table-light">
+            <tr>
+              <th scope="col">Ticket</th>
+              <th scope="col">Título</th>
+              <th scope="col">Estado</th>
+              <th scope="col">Prioridad</th>
+              <th scope="col">Categoría</th>
+              <th scope="col">Asignado</th>
+              <th scope="col">Creado</th>
+              <th scope="col">Actualizado</th>
+              <th scope="col">Riesgo SLA</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for ticket in tickets %}
+            <tr>
+              <td><a href="{% url 'ticket_detail' ticket.id %}">#{{ ticket.id }}</a></td>
+              <td>{{ ticket.title }}</td>
+              <td>{{ ticket.state }}</td>
+              <td><span class="badge bg-secondary text-uppercase">{{ ticket.priority }}</span></td>
+              <td>{{ ticket.category }}</td>
+              <td>{{ ticket.assigned_to|default:"—" }}</td>
+              <td>{{ ticket.created_at }}</td>
+              <td>{{ ticket.updated_at }}</td>
+              <td>{% if ticket.breach_risk %}<span class="badge bg-danger">Sí</span>{% else %}<span class="badge bg-success">No</span>{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted mb-0">Aún no registramos tickets para este activo.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

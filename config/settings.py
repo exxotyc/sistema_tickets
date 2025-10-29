@@ -35,6 +35,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "tickets.middleware.AccessLogMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -106,6 +107,14 @@ REST_FRAMEWORK = {
         "rest_framework.filters.SearchFilter",
         "rest_framework.filters.OrderingFilter",
     ),
+    "DEFAULT_THROTTLE_CLASSES": (
+        "rest_framework.throttling.UserRateThrottle",
+        "rest_framework.throttling.AnonRateThrottle",
+    ),
+    "DEFAULT_THROTTLE_RATES": {
+        "user": os.getenv("API_USER_RATE", "1000/day"),
+        "anon": os.getenv("API_ANON_RATE", "100/day"),
+    },
 }
 
 SIMPLE_JWT = {
@@ -149,3 +158,34 @@ TICKET_NOTIFICATIONS = {
 
 CRONJOBS = list(locals().get("CRONJOBS", []))
 CRONJOBS.append(("*/30 * * * *", "django.core.management.call_command", ["recalculate_sla"]))
+
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        }
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        }
+    },
+    "loggers": {
+        "tickets.access": {
+            "handlers": ["console"],
+            "level": "INFO",
+        },
+        "tickets.notifications": {
+            "handlers": ["console"],
+            "level": "INFO",
+        },
+        "tickets.security": {
+            "handlers": ["console"],
+            "level": "WARNING",
+        },
+    },
+}
