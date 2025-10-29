@@ -804,6 +804,7 @@ def apply_ticket_filters(qs, request):
     category = request.GET.get("category")
     assignee = request.GET.get("assignee")
     priority = request.GET.get("priority")
+    asset = request.GET.get("asset_id") or request.GET.get("asset")
 
     if fdt:
         qs = qs.filter(created_at__gte=fdt)
@@ -823,6 +824,8 @@ def apply_ticket_filters(qs, request):
             qs = qs.filter(assigned_to__username__iexact=assignee)
     if priority:
         qs = qs.filter(priority=priority)
+    if asset:
+        qs = qs.filter(asset_id=asset)
     return qs
 
 # --- ENDPOINT: /api/metrics/summary ---
