@@ -607,9 +607,11 @@ def maint_roles(request):
     users_qs = get_user_model().objects.order_by("username").only("id","username")
     users = list(users_qs.values("id","username"))
     roles_map = { str(u.id): list(u.groups.values_list("name", flat=True)) for u in users_qs }
+    roles_map_json = json.dumps(roles_map)
     return render(request, "tickets/maint_roles.html", {
         "users": users,
-        "roles_map": roles_map,               # <- se inyecta como JSON seguro en el template
+        "roles_map": roles_map,
+        "roles_map_json": roles_map_json,     # <- se inyecta como JSON seguro en el template
     })
 
 # ---------- Roles (API simple para búsquedas opcionales) ----------
