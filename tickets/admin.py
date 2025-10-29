@@ -18,7 +18,7 @@ class AttachmentInline(admin.TabularInline):
 class TicketAdmin(admin.ModelAdmin):
     list_display = ("id", "title", "state", "priority", "requester", "assigned_to", "updated_at")
     list_filter = ("state", "priority", "assigned_to", "category")
-    search_fields = ("title", "description")
+    search_fields = ("title", "description", "asset_id")
     inlines = [CommentInline, AttachmentInline]
 
 

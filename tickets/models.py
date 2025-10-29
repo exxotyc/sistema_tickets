@@ -28,6 +28,7 @@ class Ticket(models.Model):
     requester = models.ForeignKey(User, related_name="tickets", on_delete=models.CASCADE)
     assigned_to = models.ForeignKey(User, related_name="assigned_tickets", null=True, blank=True, on_delete=models.SET_NULL)
     category = models.ForeignKey(Category, null=True, blank=True, on_delete=models.SET_NULL)
+    asset_id = models.CharField(max_length=64, null=True, blank=True, db_index=True)
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default="medium")
     state = models.CharField(max_length=20, choices=STATE_CHOICES, default="open")
     created_at = models.DateTimeField(auto_now_add=True)

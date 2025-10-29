@@ -165,6 +165,7 @@ class TicketSerializer(serializers.ModelSerializer):
             "assigned_to_username",   # RO
             "category",               # RW
             "category_name",          # RO
+            "asset_id",
             "created_at",
             "updated_at",
             "frt_due_at",
