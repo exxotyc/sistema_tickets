@@ -129,11 +129,50 @@ class Ticket(models.Model):
         return f"#{self.id} {self.title}"
 
 class TicketLog(models.Model):
-    ticket = models.ForeignKey(Ticket, related_name="logs", on_delete=models.CASCADE)
+    ticket = models.ForeignKey(Ticket, related_name="logs", null=True, blank=True, on_delete=models.CASCADE)
     user = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
     action = models.CharField(max_length=200)
     meta_json = models.JSONField(default=dict, blank=True)   # <- DEBE existir
+    is_critical = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    ACTION_LABELS = {
+        "state_change": "Cambio de estado",
+        "reassigned": "Reasignado",
+        "auth.login_failed": "Inicio de sesión fallido",
+        "permissions.updated": "Actualización de permisos",
+        "faq.unresolved": "FAQ no resolvió",
+    }
+
+    def get_action_display(self):
+        return self.ACTION_LABELS.get(self.action, self.action)
+
+
+class FAQ(models.Model):
+    category = models.ForeignKey(Category, related_name="faqs", on_delete=models.CASCADE)
+    question = models.CharField(max_length=255)
+    answer = models.TextField()
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [("category", "question")]
+        ordering = ["question"]
+
+    def __str__(self):
+        return self.question
+
+
+class FAQFeedback(models.Model):
+    faq = models.ForeignKey(FAQ, related_name="feedback", on_delete=models.CASCADE)
+    user = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
+    comment = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
 
 class Comment(models.Model):
     ticket = models.ForeignKey(Ticket, related_name="comments", on_delete=models.CASCADE)
