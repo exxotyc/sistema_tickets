@@ -5,7 +5,14 @@ import mimetypes
 from rest_framework import serializers
 from django.contrib.auth.models import User
 
-from .models import Ticket, Comment, Attachment, TicketLog, Category
+from .models import (
+    Ticket,
+    Comment,
+    Attachment,
+    TicketLog,
+    Category,
+    FAQ,
+)
 
 # ---------- Users ----------
 class UserSerializer(serializers.ModelSerializer):
@@ -156,6 +163,7 @@ class TicketSerializer(serializers.ModelSerializer):
             "id",
             "title",
             "description",
+            "asset_id",
             "priority",
             "state",
             "requester",              # RO - se establece en la vista
@@ -289,9 +297,29 @@ class TicketLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = TicketLog
         fields = [
-            "id", "ticket", "user", "action", "action_display", 
-            "meta_json", "created_at"
+            "id", "ticket", "user", "action", "action_display",
+            "meta_json", "is_critical", "created_at"
         ]
         read_only_fields = [
-            "created_at", "user", "meta_json", "action_display"
+            "created_at", "user", "meta_json", "action_display", "is_critical"
         ]
+
+
+class FAQSerializer(serializers.ModelSerializer):
+    category_name = serializers.CharField(source="category.name", read_only=True)
+    unresolved = serializers.IntegerField(source="feedback.count", read_only=True)
+
+    class Meta:
+        model = FAQ
+        fields = [
+            "id",
+            "category",
+            "category_name",
+            "question",
+            "answer",
+            "is_active",
+            "created_at",
+            "updated_at",
+            "unresolved",
+        ]
+        read_only_fields = ["created_at", "updated_at", "unresolved", "category_name"]

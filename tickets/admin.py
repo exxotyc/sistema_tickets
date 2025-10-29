@@ -1,5 +1,14 @@
 from django.contrib import admin
-from .models import Ticket, Category, Comment, Attachment, TicketLog, Section
+from .models import (
+    Ticket,
+    Category,
+    Comment,
+    Attachment,
+    TicketLog,
+    Section,
+    FAQ,
+    FAQFeedback,
+)
 
 
 class CommentInline(admin.TabularInline):
@@ -22,7 +31,7 @@ class TicketAdmin(admin.ModelAdmin):
     inlines = [CommentInline, AttachmentInline]
 
 
-admin.site.register([Category, Comment, Attachment, TicketLog])
+admin.site.register([Category, Comment, Attachment, TicketLog, FAQ, FAQFeedback])
 
 @admin.register(Section)
 class SectionAdmin(admin.ModelAdmin):

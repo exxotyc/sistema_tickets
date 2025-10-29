@@ -7,9 +7,15 @@ from rest_framework_simplejwt.views import TokenRefreshView
 
 from . import views
 from .views import (
-    TicketViewSet, CategoryViewSet, TicketLogViewSet,
-    MyTokenObtainPairView, UserReadOnlyViewSet, stats,
-    CommentViewSet, AttachmentViewSet,
+    TicketViewSet,
+    CategoryViewSet,
+    TicketLogViewSet,
+    FAQViewSet,
+    MyTokenObtainPairView,
+    UserReadOnlyViewSet,
+    stats,
+    CommentViewSet,
+    AttachmentViewSet,
 )
 
 # API router
@@ -17,6 +23,7 @@ router = routers.DefaultRouter()
 router.register(r"tickets", TicketViewSet, basename="tickets")
 router.register(r"categories", CategoryViewSet, basename="categories")
 router.register(r"logs", TicketLogViewSet, basename="logs")
+router.register(r"faqs", FAQViewSet, basename="faqs")
 router.register(r"users", UserReadOnlyViewSet, basename="users")
 router.register(r"comments", CommentViewSet, basename="comments")
 router.register(r"attachments", AttachmentViewSet, basename="attachments")
@@ -31,6 +38,7 @@ api_urlpatterns = [
     # Extra Sprint 3
     path("metrics/summary/", views.metrics_summary, name="metrics_summary"),
     path("reports/export/", views.reports_export, name="reports_export"),
+    path("assets/<slug:asset_id>/tickets/", views.asset_ticket_history, name="asset_ticket_history"),
 
     path("", include(router.urls)),
     
