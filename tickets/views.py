@@ -603,11 +603,27 @@ def _is_admin_or_tech(u):
 @user_passes_test(_is_admin_or_tech)
 def maint_roles(request):
     _ensure_groups_exist()
-    # Query único para evitar listas vacías por values() mal usados
-    users_qs = get_user_model().objects.order_by("username").only("id","username")
-    users = list(users_qs.values("id","username"))
-    roles_map = { str(u.id): list(u.groups.values_list("name", flat=True)) for u in users_qs }
+
+    UserModel = get_user_model()
+    username_field = getattr(UserModel, "USERNAME_FIELD", "username")
+
+    users_qs = UserModel.objects.order_by(username_field).prefetch_related("groups")
+    users_list = list(users_qs)
+
+    users = [
+        {
+            "id": u.id,
+            "username": getattr(u, username_field) or u.get_username(),
+        }
+        for u in users_list
+    ]
+
+    roles_map = {
+        str(u.id): [g.name for g in u.groups.all() if g.name in ALLOWED_ROLE_NAMES]
+        for u in users_list
+    }
     roles_map_json = json.dumps(roles_map)
+
     return render(request, "tickets/maint_roles.html", {
         "users": users,
         "roles_map": roles_map,
