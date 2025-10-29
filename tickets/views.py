@@ -21,10 +21,8 @@ from django.db.models import Min
 from datetime import datetime, time
 from django.utils.timezone import make_aware, get_current_timezone
 from django.db.models import Count, Q
-from rest_framework.decorators import api_view, permission_classes
 from rest_framework import permissions
 from rest_framework.response import Response
-from .models import Ticket, TicketLog
 import io, csv
 
 try:
@@ -40,10 +38,17 @@ except Exception:
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets, permissions, filters, status, mixins
 from rest_framework import serializers as drf_serializers
-from rest_framework.decorators import action, api_view, permission_classes, authentication_classes
+from rest_framework.decorators import (
+    action,
+    api_view,
+    permission_classes,
+    authentication_classes,
+    throttle_classes,
+)
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 from rest_framework.authentication import SessionAuthentication
+from rest_framework.throttling import ScopedRateThrottle
 
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
@@ -52,11 +57,24 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import Ticket, Category, TicketLog, Comment, Attachment, Section
+from .models import (
+    Ticket,
+    Category,
+    TicketLog,
+    Comment,
+    Attachment,
+    Section,
+    FAQ,
+    FAQFeedback,
+)
 from .permissions import IsTicketActorOrAdmin
 from .serializers import (
-    TicketSerializer, CategorySerializer, TicketLogSerializer,
-    CommentSerializer, TicketAttachmentSerializer,
+    TicketSerializer,
+    CategorySerializer,
+    TicketLogSerializer,
+    CommentSerializer,
+    TicketAttachmentSerializer,
+    FAQSerializer,
 )
 from .reports import build_report_rows, filters_footer
 from .services.metrics import TicketMetricsService
@@ -117,6 +135,57 @@ class CategoryViewSet(viewsets.ModelViewSet):
     serializer_class = CategorySerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
+
+class FAQViewSet(viewsets.ModelViewSet):
+    queryset = FAQ.objects.select_related("category").prefetch_related("feedback")
+    serializer_class = FAQSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [filters.SearchFilter, DjangoFilterBackend, filters.OrderingFilter]
+    search_fields = ["question", "answer"]
+    filterset_fields = ["category", "is_active"]
+    ordering_fields = ["created_at", "updated_at", "question"]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if _is_admin_or_tech(self.request.user):
+            return qs
+        return qs.filter(is_active=True)
+
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
+    def mark_unresolved(self, request, pk=None):
+        faq = self.get_object()
+        comment = request.data.get("comment", "")
+        FAQFeedback.objects.create(
+            faq=faq,
+            user=request.user if request.user.is_authenticated else None,
+            comment=comment,
+        )
+        TicketLog.objects.create(
+            ticket=None,
+            user=request.user if request.user.is_authenticated else None,
+            action="faq.unresolved",
+            meta_json={"faq_id": faq.id, "question": faq.question, "comment": comment},
+            is_critical=False,
+        )
+        return Response({"ok": True, "unresolved": faq.feedback.count()})
+
+    @action(detail=False, methods=["get"], permission_classes=[permissions.IsAuthenticated])
+    def metrics(self, request):
+        qs = self.filter_queryset(self.get_queryset())
+        unresolved_qs = FAQFeedback.objects.filter(faq__in=qs)
+        metrics = {
+            "total_faqs": qs.count(),
+            "unresolved_events": unresolved_qs.count(),
+            "by_faq": list(
+                unresolved_qs.values("faq_id").annotate(total=Count("id")).order_by("-total")
+            ),
+            "by_category": list(
+                unresolved_qs.values("faq__category_id").annotate(total=Count("id")).order_by("-total")
+            ),
+        }
+        return Response(metrics)
+
+
 class TicketViewSet(viewsets.ModelViewSet):
     queryset = Ticket.objects.select_related("requester", "assigned_to", "category").all().order_by("-created_at")
     serializer_class = TicketSerializer
@@ -125,7 +194,7 @@ class TicketViewSet(viewsets.ModelViewSet):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter, DjangoFilterBackend]
     search_fields = ["title", "description"]
     ordering_fields = ["created_at", "updated_at", "priority"]
-    filterset_fields = ["state", "priority", "category"]
+    filterset_fields = ["state", "priority", "category", "asset_id"]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -180,6 +249,173 @@ class TicketViewSet(viewsets.ModelViewSet):
                 },
             )
         return Response({"status": "assigned", "assigned_to": user.username})
+
+
+ASSET_QUERY_PARAMS = [
+    openapi.Parameter(
+        "from",
+        openapi.IN_QUERY,
+        description="Fecha mínima de creación (YYYY-MM-DD o ISO).",
+        type=openapi.TYPE_STRING,
+        required=False,
+    ),
+    openapi.Parameter(
+        "to",
+        openapi.IN_QUERY,
+        description="Fecha máxima de creación (YYYY-MM-DD o ISO).",
+        type=openapi.TYPE_STRING,
+        required=False,
+    ),
+    openapi.Parameter(
+        "n",
+        openapi.IN_QUERY,
+        description="Máximo de tickets retornados dentro del rango de M días.",
+        type=openapi.TYPE_INTEGER,
+        required=False,
+    ),
+    openapi.Parameter(
+        "m",
+        openapi.IN_QUERY,
+        description="Cantidad de días hacia atrás para aplicar la regla N/M.",
+        type=openapi.TYPE_INTEGER,
+        required=False,
+    ),
+    openapi.Parameter(
+        "format",
+        openapi.IN_QUERY,
+        description="Formato de salida (json, csv o pdf).",
+        type=openapi.TYPE_STRING,
+        required=False,
+    ),
+]
+
+
+def _filter_asset_history(asset_id, request):
+    qs = Ticket.objects.filter(asset_id=asset_id)
+    qs = apply_ticket_filters(qs, request)
+    n_param = request.GET.get("n")
+    m_param = request.GET.get("m")
+
+    try:
+        n_value = int(n_param) if n_param else None
+        m_value = int(m_param) if m_param else None
+    except ValueError:
+        raise ValueError("n y m deben ser enteros positivos")
+
+    if n_value is not None and n_value <= 0:
+        raise ValueError("n debe ser mayor que cero")
+    if m_value is not None and m_value <= 0:
+        raise ValueError("m debe ser mayor que cero")
+
+    if m_value is not None:
+        window_start = now() - timedelta(days=m_value)
+        qs = qs.filter(created_at__gte=window_start)
+
+    qs = qs.order_by("-created_at")
+    if n_value is not None:
+        qs = qs[:n_value]
+    return qs
+
+
+def _asset_export_payload(qs, fmt, asset_id, params_footer):
+    fmt = (fmt or "json").lower()
+    if fmt == "json":
+        serializer = TicketSerializer(qs, many=True)
+        return Response({"asset": asset_id, "tickets": serializer.data})
+
+    headers = [
+        "ID",
+        "Título",
+        "Estado",
+        "Prioridad",
+        "Categoría",
+        "Asignado",
+        "Creado",
+    ]
+
+    if fmt == "csv":
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(headers)
+        for ticket in qs:
+            writer.writerow(
+                [
+                    ticket.id,
+                    ticket.title,
+                    ticket.state,
+                    ticket.priority,
+                    ticket.category.name if ticket.category else "",
+                    ticket.assigned_to.username if ticket.assigned_to else "",
+                    ticket.created_at.isoformat(),
+                ]
+            )
+        writer.writerow([])
+        writer.writerow([f"Parámetros: {params_footer}"])
+        payload = buffer.getvalue().encode("utf-8-sig")
+        response = Response(payload)
+        response["Content-Type"] = "text/csv; charset=utf-8"
+        response["Content-Disposition"] = f'attachment; filename="asset_{asset_id}_tickets.csv"'
+        return response
+
+    if fmt == "pdf":
+        if not canvas:
+            return Response({"error": "reportlab no instalado"}, status=501)
+        buffer = io.BytesIO()
+        pdf = canvas.Canvas(buffer)
+        pdf.setFont("Helvetica", 10)
+        y = 800
+        pdf.drawString(40, y, f"Tickets del activo {asset_id}")
+        y -= 20
+        pdf.drawString(40, y, f"Parámetros: {params_footer}")
+        y -= 20
+        for ticket in qs:
+            line = " | ".join(
+                [
+                    f"#{ticket.id}",
+                    ticket.title,
+                    ticket.state,
+                    ticket.priority,
+                    ticket.category.name if ticket.category else "",
+                    ticket.assigned_to.username if ticket.assigned_to else "",
+                    ticket.created_at.strftime("%Y-%m-%d %H:%M"),
+                ]
+            )
+            pdf.drawString(40, y, line[:200])
+            y -= 14
+            if y < 60:
+                pdf.showPage()
+                pdf.setFont("Helvetica", 10)
+                y = 800
+        pdf.showPage()
+        pdf.save()
+        payload = buffer.getvalue()
+        response = Response(payload)
+        response["Content-Type"] = "application/pdf"
+        response["Content-Disposition"] = f'attachment; filename="asset_{asset_id}_tickets.pdf"'
+        return response
+
+    raise ValueError("Formato inválido")
+
+
+@swagger_auto_schema(method="get", manual_parameters=ASSET_QUERY_PARAMS)
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+@throttle_classes([ScopedRateThrottle])
+def asset_ticket_history(request, asset_id):
+    request.throttle_scope = "assets"
+    try:
+        qs = _filter_asset_history(asset_id, request)
+    except ValueError as exc:
+        return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    footer = filters_footer(request.GET)
+    fmt = request.GET.get("format", "json")
+    try:
+        response = _asset_export_payload(qs, fmt, asset_id, footer)
+    except ValueError as exc:
+        return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return response
+
 
 class CommentViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
     queryset = Comment.objects.select_related("ticket", "user").order_by("created_at")
@@ -471,6 +707,18 @@ def roles_update(request):
     if roles:
         u.groups.add(*Group.objects.filter(name__in=roles))
 
+    TicketLog.objects.create(
+        ticket=None,
+        user=request.user if request.user.is_authenticated else None,
+        action="permissions.updated",
+        meta_json={
+            "target_user": u.username,
+            "roles": sorted(list(roles)),
+            "is_staff": is_staff,
+        },
+        is_critical=True,
+    )
+
     return JsonResponse({"ok": True})
 
 @login_required
@@ -511,6 +759,17 @@ def maint_roles_set(request):
         user.groups.remove(*Group.objects.filter(name__in=manejados))
     if roles:
         user.groups.add(*Group.objects.filter(name__in=roles))
+
+    TicketLog.objects.create(
+        ticket=None,
+        user=request.user if request.user.is_authenticated else None,
+        action="permissions.updated",
+        meta_json={
+            "target_user": user.username,
+            "roles": sorted(list(roles)),
+        },
+        is_critical=True,
+    )
 
     return JsonResponse({"ok": True, "roles": list(user.groups.values_list("name", flat=True))})
 
