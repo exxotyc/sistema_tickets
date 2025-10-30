@@ -12,7 +12,11 @@
 <div class="glass p-3 p-md-4">
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h5 m-0 d-flex align-items-center gap-2"><i class="bi bi-people"></i> Usuarios</h1>
-    <a class="btn btn-outline-secondary btn-sm btn-ripple" href="{% url 'maint_index' %}">Volver</a>
+    <div class="d-flex gap-2">
+      <button id="btnNew" class="btn btn-primary btn-sm btn-ripple"><i class="bi bi-plus-lg me-1"></i>Nuevo usuario</button>
+      <button id="btnReload" class="btn btn-outline-secondary btn-sm btn-ripple"><i class="bi bi-arrow-clockwise me-1"></i>Recargar</button>
+      <a class="btn btn-outline-secondary btn-sm btn-ripple" href="{% url 'maint_index' %}">Volver</a>
+    </div>
   </div>
 
   <div class="input-group mb-3">
@@ -20,84 +24,436 @@
     <input id="q" class="form-control" placeholder="Buscar usuario…">
   </div>
 
+  <div id="globalMsg" class="alert d-none" role="alert"></div>
+
   <div class="table-responsive">
     <table class="table table-hover align-middle">
       <thead class="table-light">
         <tr>
           <th style="width:90px">ID</th>
           <th>Usuario</th>
-          <th style="width:130px">Staff</th>
+          <th>Nombre</th>
+          <th style="width:120px">Activo</th>
+          <th style="width:120px">Staff</th>
           <th style="width:240px">Roles</th>
+          <th style="width:150px" class="text-end">Acciones</th>
         </tr>
       </thead>
       <tbody id="rows">
-        <tr><td colspan="4" class="text-center text-muted py-4">Cargando…</td></tr>
+        <tr><td colspan="7" class="text-center text-muted py-4">Cargando…</td></tr>
       </tbody>
     </table>
   </div>
 
   <div class="alert alert-info mt-3">
-    Esta vista es solo lectura. La asignación de grupos/roles se hace en el admin de Django o en un endpoint dedicado.
+    Recuerda que <strong>Admin</strong> y <strong>Técnico</strong> no pueden coexistir. Debe quedar siempre al menos un usuario con rol <strong>admin</strong> en el sistema.
+  </div>
+</div>
+
+<div id="rbacInfo"
+     data-allowed='{{ allowed_roles_json|default:"[]"|escapejs }}'
+     data-managed='{{ managed_roles_json|default:"[]"|escapejs }}'
+     data-role-options='{{ role_options_json|default:"[]"|escapejs }}'
+     data-can-staff='{{ can_manage_staff|yesno:"true,false" }}'
+     hidden></div>
+
+<div class="modal fade" id="userModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <form id="userForm">
+        <div class="modal-header">
+          <h5 class="modal-title" id="modalTitle">Nuevo usuario</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <div id="formAlert" class="alert alert-danger d-none" role="alert"></div>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label for="field_username" class="form-label">Usuario</label>
+              <input id="field_username" type="text" class="form-control" required>
+            </div>
+            <div class="col-md-6">
+              <label for="field_email" class="form-label">Correo electrónico</label>
+              <input id="field_email" type="email" class="form-control" placeholder="usuario@ejemplo.cl">
+            </div>
+            <div class="col-md-6">
+              <label for="field_first_name" class="form-label">Nombre</label>
+              <input id="field_first_name" type="text" class="form-control">
+            </div>
+            <div class="col-md-6">
+              <label for="field_last_name" class="form-label">Apellido</label>
+              <input id="field_last_name" type="text" class="form-control">
+            </div>
+            <div class="col-md-6">
+              <label for="field_password" class="form-label">Contraseña</label>
+              <input id="field_password" type="password" class="form-control" autocomplete="new-password">
+              <div class="form-text">Deja en blanco para mantener la actual.</div>
+            </div>
+            <div class="col-md-6">
+              <div class="form-check form-switch mt-4">
+                <input class="form-check-input" type="checkbox" id="field_active" checked>
+                <label class="form-check-label" for="field_active">Usuario activo</label>
+              </div>
+              {% if can_manage_staff %}
+                <div class="form-check form-switch mt-2">
+                  <input class="form-check-input" type="checkbox" id="field_staff">
+                  <label class="form-check-label" for="field_staff">Staff</label>
+                </div>
+              {% else %}
+                <div class="form-text text-muted">No puedes modificar el estado de staff.</div>
+              {% endif %}
+            </div>
+            <div class="col-12">
+              <label class="form-label">Roles</label>
+              <div id="roleCheckboxes" class="d-flex flex-wrap gap-3"></div>
+              <div class="form-text">Admin y Técnico son excluyentes.</div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary btn-ripple" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary btn-ripple" id="modalSaveBtn">Guardar</button>
+        </div>
+      </form>
+    </div>
   </div>
 </div>
 {% endblock %}
 
+
 {% block extra_js %}
 <script>
-function esc(s){return String(s||"").replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));}
-async function apiFetch(url, opts={}){
-  const t=localStorage.getItem("access_token"); if(!t){ alert("Sesión inválida"); return null; }
-  const r=await fetch(url, {...opts, headers:{...(opts.headers||{}), Authorization:"Bearer "+t}});
-  if(r.status===401){ alert("No autorizado"); return null; }
-  return r;
-}
-let allItems=[];
+document.addEventListener("DOMContentLoaded", function(){
+  const API_BASE = "/api/users/";
 
-function render(list){
-  const tb=document.getElementById("rows");
-  if(!list.length){ tb.innerHTML='<tr><td colspan="4" class="text-center text-muted py-4">Sin usuarios</td></tr>'; return; }
-  tb.innerHTML="";
-  for(const u of list){
-    const roles = Array.isArray(u.roles)?u.roles:[];
-    const tr=document.createElement("tr");
-    tr.innerHTML=`
-      <td>${u.id}</td>
-      <td><strong>${esc(u.username||"-")}</strong></td>
-      <td>${u.is_staff?'<span class="badge text-bg-primary tag">Sí</span>':'<span class="badge text-bg-secondary tag">No</span>'}</td>
-      <td>${roles.length?roles.map(r=>`<span class="badge text-bg-light me-1 tag">${esc(r)}</span>`).join(""):'<span class="text-muted">—</span>'}</td>
-    `;
-    tb.appendChild(tr);
+  const infoEl = document.getElementById("rbacInfo");
+  let allowedRoles = [];
+  let roleOptions = [];
+  let canManageStaff = false;
+  if(infoEl){
+    try{ allowedRoles = JSON.parse(infoEl.dataset.allowed || "[]"); }catch(_){ allowedRoles = []; }
+    try{ roleOptions = JSON.parse(infoEl.dataset.roleOptions || "[]"); }catch(_){ roleOptions = []; }
+    canManageStaff = infoEl.dataset.canStaff === "true";
   }
-}
+  const allowedSet = new Set(allowedRoles);
 
-function applyFilter(){
-  const q=document.getElementById("q").value.trim().toLowerCase();
-  const list=!q?allItems:allItems.filter(x=>(x.username||"").toLowerCase().includes(q));
-  render(list);
-}
+  function esc(s){
+    return String(s||"").replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",\"":"&quot;","'":"&#39;"}[m]));
+  }
 
-document.getElementById("q").addEventListener("input", applyFilter);
+  async function apiFetch(url, opts={}){
+    const t = localStorage.getItem("access_token");
+    if(!t){ alert("Sesión inválida"); return null; }
+    const headers = {...(opts.headers||{}), Authorization: "Bearer "+t};
+    if(opts.body && !headers["Content-Type"]){ headers["Content-Type"] = "application/json"; }
+    const response = await fetch(url, {...opts, headers});
+    if(response.status === 401){ alert("No autorizado"); return null; }
+    return response;
+  }
 
-async function load(){
-  const r=await apiFetch("/api/users/");
-  if(!r) return;
-  const data=await r.json();
-  // Ampliar payload con roles e is_staff mediante /api/token/ opcional
-  allItems = data.map(u=>({
-    id:u.id, username:u.username, is_staff: !!u.is_staff, roles: u.roles||[]
-  }));
-  // Si el endpoint no trae is_staff y roles, intentar decodificar del propio token del navegador:
-  try{
-    const tok=localStorage.getItem("access_token");
-    const payload = JSON.parse(atob(tok.split(".")[1]));
-    if(payload && payload.username){
-      // No se sobreescribe lista. Solo garantiza que al menos el usuario actual tenga flags.
-      const me = allItems.find(x=>x.username===payload.username);
-      if(me){ me.is_staff = !!payload.is_staff; me.roles = payload.roles||me.roles; }
+  const qInput = document.getElementById("q");
+  const rows = document.getElementById("rows");
+  const btnNew = document.getElementById("btnNew");
+  const btnReload = document.getElementById("btnReload");
+  const globalMsg = document.getElementById("globalMsg");
+
+  const modalEl = document.getElementById("userModal");
+  const modal = new bootstrap.Modal(modalEl);
+  const form = document.getElementById("userForm");
+  const formAlert = document.getElementById("formAlert");
+  const modalTitle = document.getElementById("modalTitle");
+  const modalSaveBtn = document.getElementById("modalSaveBtn");
+
+  const fieldUsername = document.getElementById("field_username");
+  const fieldEmail = document.getElementById("field_email");
+  const fieldFirstName = document.getElementById("field_first_name");
+  const fieldLastName = document.getElementById("field_last_name");
+  const fieldPassword = document.getElementById("field_password");
+  const fieldActive = document.getElementById("field_active");
+  const fieldStaff = document.getElementById("field_staff");
+  const roleContainer = document.getElementById("roleCheckboxes");
+  const roleCheckboxes = new Map();
+
+  function setGlobalMsg(text, ok){
+    if(!text){
+      globalMsg.classList.add("d-none");
+      globalMsg.textContent = "";
+      return;
     }
-  }catch(_){}
-  applyFilter();
-}
-load();
+    globalMsg.className = "alert " + (ok ? "alert-success" : "alert-danger");
+    globalMsg.textContent = text;
+  }
+
+  function showFormError(text){
+    formAlert.textContent = text || "Error desconocido";
+    formAlert.classList.remove("d-none");
+  }
+
+  function hideFormError(){
+    formAlert.classList.add("d-none");
+    formAlert.textContent = "";
+  }
+
+  function buildRoleInputs(){
+    roleContainer.innerHTML = "";
+    roleCheckboxes.clear();
+    roleOptions.forEach(option => {
+      const wrapper = document.createElement("div");
+      wrapper.className = "form-check";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.className = "form-check-input";
+      input.id = `modal_role_${option.code}`;
+      input.value = option.code;
+      const allowed = allowedSet.has(option.code);
+      input.dataset.locked = allowed ? "0" : "1";
+      if(!allowed){
+        input.disabled = true;
+        wrapper.classList.add("text-muted");
+        input.title = "No tienes permiso para asignar este rol.";
+      }
+      input.addEventListener("change", enforceRoleExclusion);
+      const label = document.createElement("label");
+      label.className = "form-check-label";
+      label.setAttribute("for", input.id);
+      label.textContent = option.label || option.code;
+      wrapper.appendChild(input);
+      wrapper.appendChild(label);
+      roleContainer.appendChild(wrapper);
+      roleCheckboxes.set(option.code, input);
+    });
+  }
+
+  function enforceRoleExclusion(){
+    const admin = roleCheckboxes.get("admin");
+    const tec = roleCheckboxes.get("tecnico");
+    if(admin && tec){
+      const adminLocked = admin.dataset.locked === "1";
+      const tecLocked = tec.dataset.locked === "1";
+
+      if(admin.checked){
+        tec.checked = false;
+        if(!tecLocked){ tec.disabled = true; }
+      }else if(!tecLocked){
+        tec.disabled = false;
+      }
+
+      if(tec.checked){
+        admin.checked = false;
+        if(!adminLocked){ admin.disabled = true; }
+      }else if(!adminLocked){
+        admin.disabled = false;
+      }
+
+      if(adminLocked){ admin.disabled = true; }
+      if(tecLocked){ tec.disabled = true; }
+    }
+  }
+
+  function resetRoles(){
+    roleCheckboxes.forEach(input => {
+      input.checked = false;
+      input.disabled = input.dataset.locked === "1";
+    });
+    enforceRoleExclusion();
+  }
+
+  function setRoles(list){
+    const roles = Array.isArray(list) ? list : [];
+    roleCheckboxes.forEach((input, code) => {
+      input.checked = roles.includes(code);
+      input.disabled = input.dataset.locked === "1" && !input.checked;
+    });
+    enforceRoleExclusion();
+  }
+
+  function collectRoles(){
+    const roles = [];
+    roleCheckboxes.forEach((input, code) => {
+      if(input.checked){ roles.push(code); }
+    });
+    return roles;
+  }
+
+  let allItems = [];
+  let currentId = null;
+
+  function render(list){
+    if(!list.length){
+      rows.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Sin usuarios</td></tr>';
+      return;
+    }
+    rows.innerHTML = "";
+    list.forEach(u => {
+      const roles = Array.isArray(u.roles) ? u.roles : [];
+      const fullName = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
+      const roleBadges = roles.length ? roles.map(r=>`<span class="badge text-bg-light me-1 tag">${esc(r)}</span>`).join("") : '<span class="text-muted">—</span>';
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${u.id}</td>
+        <td><strong>${esc(u.username||"-")}</strong>${u.email?`<div class="text-muted small">${esc(u.email)}</div>`:""}</td>
+        <td>${fullName?esc(fullName):'<span class="text-muted">—</span>'}</td>
+        <td>${u.is_active!==false?'<span class="badge text-bg-success tag">Sí</span>':'<span class="badge text-bg-secondary tag">No</span>'}</td>
+        <td>${u.is_staff?'<span class="badge text-bg-primary tag">Sí</span>':'<span class="badge text-bg-secondary tag">No</span>'}</td>
+        <td>${roleBadges}</td>
+        <td class="text-end">
+          <button class="btn btn-outline-primary btn-sm btn-ripple me-1" data-action="edit" data-id="${u.id}"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-outline-danger btn-sm btn-ripple" data-action="delete" data-id="${u.id}"><i class="bi bi-trash"></i></button>
+        </td>
+      `;
+      rows.appendChild(tr);
+    });
+  }
+
+  function applyFilter(){
+    const term = qInput.value.trim().toLowerCase();
+    if(!term){ render(allItems); return; }
+    const filtered = allItems.filter(u => {
+      const tokens = [
+        u.username || "",
+        u.email || "",
+        `${u.first_name||""} ${u.last_name||""}`,
+        (Array.isArray(u.roles)?u.roles:[]).join(" "),
+      ];
+      return tokens.some(token => token.toLowerCase().includes(term));
+    });
+    render(filtered);
+  }
+
+  qInput.addEventListener("input", applyFilter);
+
+  async function loadUsers(){
+    const response = await apiFetch(API_BASE);
+    if(!response) return;
+    const data = await response.json().catch(()=>[]);
+    allItems = Array.isArray(data) ? data : [];
+    applyFilter();
+  }
+
+  function openModal(mode, user){
+    currentId = mode === "edit" && user ? user.id : null;
+    form.reset();
+    hideFormError();
+    resetRoles();
+    fieldPassword.value = "";
+    fieldPassword.required = currentId === null;
+    fieldActive.checked = true;
+    if(fieldStaff){ fieldStaff.checked = false; }
+
+    if(currentId){
+      modalTitle.textContent = "Editar usuario";
+      modalSaveBtn.textContent = "Guardar cambios";
+      fieldUsername.value = user.username || "";
+      fieldEmail.value = user.email || "";
+      fieldFirstName.value = user.first_name || "";
+      fieldLastName.value = user.last_name || "";
+      fieldActive.checked = user.is_active !== false;
+      if(fieldStaff){ fieldStaff.checked = !!user.is_staff; }
+      setRoles(user.roles);
+    }else{
+      modalTitle.textContent = "Nuevo usuario";
+      modalSaveBtn.textContent = "Crear usuario";
+    }
+
+    modal.show();
+  }
+
+  function collectPayload(){
+    const payload = {
+      username: fieldUsername.value.trim(),
+      email: fieldEmail.value.trim(),
+      first_name: fieldFirstName.value.trim(),
+      last_name: fieldLastName.value.trim(),
+      is_active: fieldActive.checked,
+      roles: collectRoles(),
+    };
+    if(fieldStaff){ payload.is_staff = fieldStaff.checked; }
+    const pwd = fieldPassword.value;
+    if(pwd){ payload.password = pwd; }
+    return payload;
+  }
+
+  rows.addEventListener("click", async (ev) => {
+    const btn = ev.target.closest("[data-action]");
+    if(!btn) return;
+    const id = Number(btn.dataset.id);
+    const user = allItems.find(x => x.id === id);
+    if(!user) return;
+    if(btn.dataset.action === "edit"){
+      openModal("edit", user);
+    }else if(btn.dataset.action === "delete"){
+      if(!confirm(`¿Eliminar al usuario ${user.username}?`)) return;
+      const response = await apiFetch(`${API_BASE}${id}/`, { method:"DELETE" });
+      if(!response) return;
+      if(response.ok){
+        setGlobalMsg("Usuario eliminado.", true);
+        await loadUsers();
+      }else{
+        let data = {};
+        try{ data = await response.json(); }catch(_){ data = {}; }
+        setGlobalMsg(data.detail || data.error || "No se pudo eliminar el usuario.", false);
+      }
+    }
+  });
+
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    hideFormError();
+    const payload = collectPayload();
+    if(payload.roles.includes("admin") && payload.roles.includes("tecnico")){
+      showFormError("Admin y Técnico no pueden coexistir.");
+      return;
+    }
+
+    try{
+      let response;
+      if(currentId){
+        response = await apiFetch(`${API_BASE}${currentId}/`, { method:"PUT", body: JSON.stringify(payload) });
+      }else{
+        response = await apiFetch(API_BASE, { method:"POST", body: JSON.stringify(payload) });
+      }
+      if(!response) return;
+
+      let data = {};
+      if(response.status !== 204){
+        try{ data = await response.json(); }catch(_){ data = {}; }
+      }
+
+      if(!response.ok){
+        const error = data.detail || data.error || (typeof data === "object" ? Object.values(data).join(" ") : "Error al guardar");
+        showFormError(error);
+        return;
+      }
+
+      modal.hide();
+      setGlobalMsg(currentId ? "Usuario actualizado." : "Usuario creado.", true);
+      await loadUsers();
+    }catch(err){
+      showFormError("Error de red. Intenta nuevamente.");
+    }
+  });
+
+  btnNew.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    openModal("create");
+  });
+
+  btnReload.addEventListener("click", async (ev) => {
+    ev.preventDefault();
+    await loadUsers();
+  });
+
+  const canCreate = allowedSet.size > 0 || canManageStaff;
+  if(!canCreate){
+    btnNew.disabled = true;
+    btnNew.title = "No tienes permisos para crear usuarios.";
+  }
+
+  buildRoleInputs();
+  enforceRoleExclusion();
+  loadUsers();
+});
 </script>
 {% endblock %}
+
+

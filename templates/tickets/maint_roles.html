@@ -6,6 +6,7 @@
   .card-callout{border-left:4px solid #dc3545;background:#fff}
   .role-grid{display:flex;gap:1rem;flex-wrap:wrap}
   .role-grid .form-check{min-width:110px}
+  .role-grid .form-check.text-muted label{cursor:not-allowed}
 </style>
 {% endblock %}
 
@@ -23,6 +24,9 @@
           <li>No dejes el sistema sin al menos <strong>un admin</strong>.</li>
           <li><strong>Admin</strong> y <strong>Técnico</strong> son excluyentes.</li>
           <li><strong>Usuario</strong> es opcional y puede coexistir.</li>
+          {% if allowed_roles and managed_roles and allowed_roles|length < managed_roles|length %}
+            <li>Solo puedes modificar: {{ allowed_roles|join:', ' }}.</li>
+          {% endif %}
         </ul>
       </div>
     </div>
@@ -40,19 +44,13 @@
 
       <div class="col-12 col-md-6">
         <label class="form-label">Roles</label>
-        <div class="role-grid">
-          <div class="form-check">
-            <input class="form-check-input" type="checkbox" id="r_admin" value="admin">
-            <label class="form-check-label" for="r_admin">Admin</label>
-          </div>
-          <div class="form-check">
-            <input class="form-check-input" type="checkbox" id="r_tecnico" value="tecnico">
-            <label class="form-check-label" for="r_tecnico">Técnico</label>
-          </div>
-          <div class="form-check">
-            <input class="form-check-input" type="checkbox" id="r_usuario" value="usuario">
-            <label class="form-check-label" for="r_usuario">Usuario</label>
-          </div>
+        <div class="role-grid" id="rolesGrid">
+          {% for option in role_options %}
+            <div class="form-check">
+              <input class="form-check-input role-checkbox" type="checkbox" id="r_{{ option.code }}" value="{{ option.code }}">
+              <label class="form-check-label" for="r_{{ option.code }}">{{ option.label }}</label>
+            </div>
+          {% endfor %}
         </div>
         <div class="form-text">Admin y Técnico no pueden coexistir.</div>
       </div>
@@ -69,6 +67,12 @@
 
 {# Embed seguro de roles sin json_script: JSON en data-attribute #}
 <div id="rolesMapSrc" data-rolesmap='{{ roles_map_json|escapejs }}' hidden></div>
+<div id="rbacInfo"
+     data-allowed='{{ allowed_roles_json|default:"[]"|escapejs }}'
+     data-managed='{{ managed_roles_json|default:"[]"|escapejs }}'
+     data-labels='{{ role_labels_json|default:"{}"|escapejs }}'
+     data-can-staff='{{ can_manage_staff|yesno:"true,false" }}'
+     hidden></div>
 {% endblock %}
 
 {% block extra_js %}
@@ -80,6 +84,18 @@ document.addEventListener("DOMContentLoaded", function(){
   const usr   = document.getElementById("r_usuario");
   const msg   = document.getElementById("msg");
   const btn   = document.getElementById("btnSave");
+  const roleCheckboxes = Array.from(document.querySelectorAll(".role-checkbox"));
+  const infoEl = document.getElementById("rbacInfo");
+
+  let allowedRoles = [];
+  let managedRoles = [];
+  let roleLabels = {};
+  if(infoEl){
+    try{ allowedRoles = JSON.parse(infoEl.dataset.allowed || "[]"); }catch(_){ allowedRoles = []; }
+    try{ managedRoles = JSON.parse(infoEl.dataset.managed || "[]"); }catch(_){ managedRoles = []; }
+    try{ roleLabels = JSON.parse(infoEl.dataset.labels || "{}"); }catch(_){ roleLabels = {}; }
+  }
+  const allowedSet = new Set(allowedRoles);
 
   // Carga mapa { "<id>":["admin","usuario"], ... } desde data-attribute
   let rolesMap = {};
@@ -88,17 +104,47 @@ document.addEventListener("DOMContentLoaded", function(){
     rolesMap = JSON.parse(raw);
   }catch(_){ rolesMap = {}; }
 
+  roleCheckboxes.forEach(cb => {
+    const role = cb.value;
+    const allowed = allowedSet.has(role);
+    cb.dataset.locked = allowed ? "0" : "1";
+    cb.disabled = !allowed;
+    if(!allowed){
+      cb.title = "No tienes permiso para modificar este rol.";
+      cb.closest(".form-check").classList.add("text-muted");
+    }
+  });
+
   function setMsg(text, ok){
     msg.textContent = text || "";
     msg.className = "ms-2 small " + (ok===true ? "text-success" : ok===false ? "text-danger" : "text-muted");
   }
   function reset(){
-    admin.checked = tec.checked = usr.checked = false;
-    admin.disabled = tec.disabled = false;
+    roleCheckboxes.forEach(cb => {
+      cb.checked = false;
+      cb.disabled = cb.dataset.locked === "1";
+    });
   }
   function enforceExclusion(){
-    if(admin.checked){ tec.checked=false; tec.disabled=true; } else { tec.disabled=false; }
-    if(tec.checked){ admin.checked=false; admin.disabled=true; } else { admin.disabled=false; }
+    const adminLocked = admin.dataset.locked === "1";
+    const tecLocked = tec.dataset.locked === "1";
+
+    if(admin.checked){
+      tec.checked = false;
+      if(!tecLocked){ tec.disabled = true; }
+    }else if(!tecLocked){
+      tec.disabled = false;
+    }
+
+    if(tec.checked){
+      admin.checked = false;
+      if(!adminLocked){ admin.disabled = true; }
+    }else if(!adminLocked){
+      admin.disabled = false;
+    }
+
+    if(adminLocked){ admin.disabled = true; }
+    if(tecLocked){ tec.disabled = true; }
   }
   admin.addEventListener("change", enforceExclusion);
   tec.addEventListener("change", enforceExclusion);
@@ -114,6 +160,46 @@ document.addEventListener("DOMContentLoaded", function(){
     });
     enforceExclusion();
   });
+
+  async function refreshUsers(){
+    try{
+      const response = await fetch("{% url 'roles_data' %}");
+      if(!response.ok) return;
+      const payload = await response.json();
+      const list = Array.isArray(payload.users) ? payload.users : [];
+      const previous = sel.value;
+
+      const frag = document.createDocumentFragment();
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.disabled = true;
+      placeholder.selected = true;
+      placeholder.textContent = "Selecciona usuario…";
+      frag.appendChild(placeholder);
+
+      rolesMap = {};
+      list.forEach(item => {
+        const opt = document.createElement("option");
+        opt.value = item.id;
+        opt.textContent = item.username || item.raw_username || `#${item.id}`;
+        frag.appendChild(opt);
+        rolesMap[String(item.id)] = Array.isArray(item.roles) ? item.roles : [];
+      });
+
+      sel.innerHTML = "";
+      sel.appendChild(frag);
+
+      if(previous && rolesMap[String(previous)]){
+        sel.value = previous;
+      }
+
+      if(sel.value){
+        sel.dispatchEvent(new Event("change"));
+      }else{
+        sel.selectedIndex = 0;
+      }
+    }catch(_){ /* ignore network errors */ }
+  }
 
   document.getElementById("roleForm").addEventListener("submit", async (ev)=>{
     ev.preventDefault(); setMsg("", null);
@@ -142,12 +228,14 @@ document.addEventListener("DOMContentLoaded", function(){
       }else{
         rolesMap[String(uid)] = data.roles || [];
         setMsg("Roles actualizados.", true);
+        await refreshUsers();
       }
     }catch(_){ setMsg("Fallo de red.", false); }
     finally{ btn.disabled = false; }
   });
 
   if(sel.options.length > 1){ sel.selectedIndex = 1; sel.dispatchEvent(new Event("change")); }
+  refreshUsers();
 });
 </script>
 {% endblock %}

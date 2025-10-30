@@ -6,7 +6,6 @@ import json
 
 from django.contrib import messages
 from django.contrib.auth import get_user_model, logout
-from django.contrib.auth.models import Group
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.db.models import Q, Count
 from django.utils.timezone import now
@@ -53,6 +52,7 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.throttling import ScopedRateThrottle
+from rest_framework.exceptions import PermissionDenied
 
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
@@ -61,6 +61,7 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from . import rbac
 from .models import (
     Ticket,
     Category,
@@ -79,6 +80,7 @@ from .serializers import (
     CommentSerializer,
     TicketAttachmentSerializer,
     FAQSerializer,
+    UserAdminSerializer,
 )
 from .reports import build_report_rows, filters_footer
 from .services.assets import build_asset_history
@@ -87,7 +89,6 @@ from .services.metrics import TicketMetricsService
 # ==================== Helpers ====================
 
 UserModel = get_user_model()
-ALLOWED_ROLE_NAMES = {"admin", "tecnico", "usuario"}  # roles gestionados por el mantenedor
 
 def in_group(user, name: str) -> bool:
     return user.is_authenticated and user.groups.filter(name=name).exists()
@@ -114,10 +115,6 @@ def _render(request, template_name, ctx=None):
     ctx = ctx or {}
     ctx.setdefault("maint_sections", _navbar_sections(request.user))
     return render(request, template_name, ctx)
-
-def _ensure_groups_exist():
-    for name in ALLOWED_ROLE_NAMES:
-        Group.objects.get_or_create(name=name)
 
 # ==================== JWT ====================
 
@@ -431,18 +428,93 @@ class TicketLogViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = TicketLogSerializer
     permission_classes = [permissions.IsAuthenticated]
 
-class UserReadOnlyViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = UserModel.objects.order_by("username")
-    serializer_class = drf_serializers.Serializer
+class UserViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
+    serializer_class = UserAdminSerializer
 
-    def list(self, request, *args, **kwargs):
-        qs = self.get_queryset()
-        u = request.user
-        if not _is_adminlike(u):
-            qs = qs.filter(pk=u.pk)
-        data = [{"id": usr.id, "username": usr.username} for usr in qs]
-        return Response(data)
+    def get_queryset(self):
+        username_field = getattr(UserModel, "USERNAME_FIELD", "username")
+        qs = UserModel.objects.all().order_by(username_field).prefetch_related("groups")
+        user = self.request.user
+        if not _is_adminlike(user):
+            return qs.filter(pk=user.pk)
+
+        search = (self.request.query_params.get("search") or self.request.query_params.get("q") or "").strip()
+        if search:
+            qs = qs.filter(
+                Q(username__icontains=search)
+                | Q(email__icontains=search)
+                | Q(first_name__icontains=search)
+                | Q(last_name__icontains=search)
+            )
+        return qs
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        ctx["actor"] = self.request.user
+        return ctx
+
+    def perform_create(self, serializer):
+        actor = self.request.user
+        allowed = rbac.actor_allowed_roles(actor)
+        if not allowed and not (actor.is_staff or actor.is_superuser):
+            raise PermissionDenied("No autorizado para crear usuarios.")
+
+        roles = list(serializer.validated_data.get("roles") or [])
+        disallowed = set(roles) - allowed
+        if disallowed:
+            raise PermissionDenied(
+                "No puedes asignar los roles: " + ", ".join(sorted(disallowed))
+            )
+
+        if serializer.validated_data.get("is_staff") and not (
+            actor.is_staff or actor.is_superuser
+        ):
+            raise PermissionDenied("No puedes asignar el estado de staff.")
+
+        serializer.save()
+
+    def perform_update(self, serializer):
+        actor = self.request.user
+        target = serializer.instance
+
+        if "is_staff" in serializer.validated_data:
+            desired_staff = bool(serializer.validated_data["is_staff"])
+            if desired_staff != target.is_staff and not (
+                actor.is_staff or actor.is_superuser
+            ):
+                raise PermissionDenied("No puedes modificar el estado de staff.")
+
+        roles = serializer.validated_data.get("roles", None)
+        if roles is not None:
+            try:
+                rbac.assert_actor_can_manage(actor, target, roles)
+            except rbac.LastAdminRemovalError as exc:
+                raise PermissionDenied(str(exc))
+            except rbac.RolePermissionError as exc:
+                raise PermissionDenied(str(exc))
+
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        actor = self.request.user
+        if actor.pk == instance.pk:
+            raise PermissionDenied("No puedes eliminar tu propio usuario.")
+
+        allowed = rbac.actor_allowed_roles(actor)
+        if not (actor.is_staff or actor.is_superuser):
+            current_roles = set(rbac.user_managed_roles(instance))
+            if current_roles - allowed:
+                raise PermissionDenied(
+                    "No puedes eliminar usuarios con roles que no administras."
+                )
+
+        if "admin" in rbac.user_managed_roles(instance) and not rbac.has_other_admins(
+            instance
+        ):
+            raise PermissionDenied("Debe quedar al menos un admin en el sistema.")
+
+        super().perform_destroy(instance)
 
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
@@ -586,49 +658,82 @@ def maint_section(request, code: str):
         "code": sec.code,
         "maint_sections": _navbar_sections(request.user),
     }
+    if code == "usuarios":
+        allowed_roles = sorted(rbac.actor_allowed_roles(request.user))
+        managed_roles = sorted(rbac.MANAGED_ROLE_NAMES)
+        role_options = [
+            {"code": r, "label": rbac.ROLE_LABELS.get(r, r.title())}
+            for r in managed_roles
+        ]
+        ctx.update(
+            {
+                "allowed_roles": allowed_roles,
+                "managed_roles": managed_roles,
+                "allowed_roles_json": json.dumps(allowed_roles),
+                "managed_roles_json": json.dumps(managed_roles),
+                "role_labels_json": json.dumps(rbac.ROLE_LABELS),
+                "role_labels": rbac.ROLE_LABELS,
+                "can_manage_staff": request.user.is_staff or request.user.is_superuser,
+                "role_options": role_options,
+                "role_options_json": json.dumps(role_options),
+            }
+        )
     return TemplateResponse(request, template=[tpl_specific, tpl_fallback], context=ctx)
 
 # ---------- Roles (UI) ----------
 
-ALLOWED_ROLE_NAMES = {"admin", "tecnico", "usuario"}
-
-def _ensure_groups_exist():
-    for name in ALLOWED_ROLE_NAMES:
-        Group.objects.get_or_create(name=name)
-
 def _is_admin_or_tech(u):
-    return u.is_authenticated and (u.is_staff or u.groups.filter(name__in=["admin","tecnico"]).exists())
+    return bool(rbac.actor_allowed_roles(u))
 
 @login_required
 @user_passes_test(_is_admin_or_tech)
 def maint_roles(request):
-    _ensure_groups_exist()
+    rbac.ensure_groups_exist()
 
-    UserModel = get_user_model()
     username_field = getattr(UserModel, "USERNAME_FIELD", "username")
-
     users_qs = UserModel.objects.order_by(username_field).prefetch_related("groups")
     users_list = list(users_qs)
+
+    def _display_name(user):
+        base = getattr(user, username_field) or user.get_username()
+        full = (user.get_full_name() or "").strip()
+        if full:
+            return f"{full} ({user.get_username()})"
+        return base
 
     users = [
         {
             "id": u.id,
-            "username": getattr(u, username_field) or u.get_username(),
+            "username": _display_name(u),
         }
         for u in users_list
     ]
 
-    roles_map = {
-        str(u.id): [g.name for g in u.groups.all() if g.name in ALLOWED_ROLE_NAMES]
-        for u in users_list
-    }
-    roles_map_json = json.dumps(roles_map)
+    roles_map = {str(u.id): rbac.user_managed_roles(u) for u in users_list}
+    allowed_roles = sorted(rbac.actor_allowed_roles(request.user))
+    managed_roles = sorted(rbac.MANAGED_ROLE_NAMES)
 
-    return render(request, "tickets/maint_roles.html", {
+    role_options = [
+        {"code": r, "label": rbac.ROLE_LABELS.get(r, r.title())}
+        for r in managed_roles
+    ]
+
+    ctx = {
         "users": users,
         "roles_map": roles_map,
-        "roles_map_json": roles_map_json,     # <- se inyecta como JSON seguro en el template
-    })
+        "roles_map_json": json.dumps(roles_map),
+        "allowed_roles": allowed_roles,
+        "managed_roles": managed_roles,
+        "allowed_roles_json": json.dumps(allowed_roles),
+        "managed_roles_json": json.dumps(managed_roles),
+        "role_labels_json": json.dumps(rbac.ROLE_LABELS),
+        "role_labels": rbac.ROLE_LABELS,
+        "can_manage_staff": request.user.is_staff or request.user.is_superuser,
+        "role_options": role_options,
+        "role_options_json": json.dumps(role_options),
+    }
+
+    return render(request, "tickets/maint_roles.html", ctx)
 
 # ---------- Roles (API simple para búsquedas opcionales) ----------
 
@@ -638,15 +743,27 @@ def roles_data(request):
     if not _is_adminlike(request.user):
         return HttpResponseForbidden("No autorizado")
     q = (request.GET.get("q") or "").strip().lower()
-    users = UserModel.objects.order_by("username")
+    username_field = getattr(UserModel, "USERNAME_FIELD", "username")
+    users = UserModel.objects.order_by(username_field)
     if q:
-        users = users.filter(username__icontains=q)
+        users = users.filter(
+            Q(username__icontains=q)
+            | Q(email__icontains=q)
+            | Q(first_name__icontains=q)
+            | Q(last_name__icontains=q)
+        )
     data = []
     for u in users:
-        roles = [r for r in u.groups.values_list("name", flat=True) if r in ALLOWED_ROLE_NAMES]
+        roles = rbac.user_managed_roles(u)
+        full_name = (u.get_full_name() or "").strip()
+        base_name = getattr(u, username_field) or u.get_username()
+        display = f"{full_name} ({u.get_username()})" if full_name else base_name
         data.append({
             "id": u.id,
-            "username": u.username,
+            "username": display,
+            "raw_username": u.get_username(),
+            "email": u.email,
+            "full_name": full_name,
             "is_staff": u.is_staff,
             "roles": roles,
         })
@@ -660,61 +777,57 @@ def roles_data(request):
 def roles_update(request):
     if not _is_adminlike(request.user):
         return HttpResponseForbidden("No autorizado")
-    _ensure_groups_exist()
+    rbac.ensure_groups_exist()
 
     try:
         payload = json.loads(request.body.decode("utf-8"))
         user_id = int(payload.get("user_id"))
         roles = payload.get("roles", [])
-        is_staff = bool(payload.get("is_staff", False))
+        is_staff = payload.get("is_staff")
     except Exception:
         return JsonResponse({"ok": False, "error": "JSON inválido"}, status=400)
 
     try:
-        u = UserModel.objects.get(pk=user_id)
+        target = UserModel.objects.get(pk=user_id)
     except UserModel.DoesNotExist:
         return JsonResponse({"ok": False, "error": "Usuario no existe"}, status=404)
 
-    roles = {str(r).strip() for r in roles if str(r).strip() in ALLOWED_ROLE_NAMES}
-    if "admin" in roles and "tecnico" in roles:
+    sanitized_roles = rbac.clean_roles(roles)
+    if "admin" in sanitized_roles and "tecnico" in sanitized_roles:
         return JsonResponse({"ok": False, "error": "admin y técnico son excluyentes"}, status=400)
 
-    # no dejar el sistema sin admin
-    if "admin" not in roles and (
-        u.groups.filter(name="admin").exists() or u.is_superuser or u.is_staff
-    ):
-        if not UserModel.objects.filter(groups__name="admin").exclude(pk=u.pk).exists():
-            return JsonResponse({"ok": False, "error": "Debe quedar al menos un admin"}, status=400)
+    try:
+        desired = rbac.assert_actor_can_manage(request.user, target, sanitized_roles)
+    except rbac.LastAdminRemovalError as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=400)
+    except rbac.RolePermissionError as exc:
+        return JsonResponse({"ok": False, "error": str(exc)}, status=403)
 
-    u.is_staff = is_staff
-    u.save(update_fields=["is_staff"])
+    if is_staff is not None:
+        if not (request.user.is_staff or request.user.is_superuser):
+            return JsonResponse({"ok": False, "error": "No puedes modificar el estado de staff."}, status=403)
+        target.is_staff = bool(is_staff)
+        target.save(update_fields=["is_staff"])
 
-    # reemplaza los grupos gestionados
-    current = set(u.groups.values_list("name", flat=True))
-    managed_current = current & ALLOWED_ROLE_NAMES
-    if managed_current:
-        u.groups.remove(*Group.objects.filter(name__in=managed_current))
-    if roles:
-        u.groups.add(*Group.objects.filter(name__in=roles))
+    applied = rbac.apply_roles(target, desired)
 
     TicketLog.objects.create(
         ticket=None,
         user=request.user if request.user.is_authenticated else None,
         action="permissions.updated",
         meta_json={
-            "target_user": u.username,
-            "roles": sorted(list(roles)),
-            "is_staff": is_staff,
+            "target_user": target.get_username(),
+            "roles": applied,
+            "is_staff": target.is_staff,
         },
         is_critical=True,
     )
 
-    return JsonResponse({"ok": True})
+    return JsonResponse({"ok": True, "roles": applied})
 
 @login_required
 @user_passes_test(_is_admin_or_tech)
 def maint_roles_set(request):
-    import json
     try:
         payload = json.loads(request.body or "{}")
         user_id = int(payload.get("user_id"))
@@ -725,43 +838,35 @@ def maint_roles_set(request):
     if not user_id:
         return JsonResponse({"error":"user_id requerido"}, status=400)
 
-    # Exclusión admin/tecnico
-    if "admin" in roles and "tecnico" in roles:
+    sanitized_roles = rbac.clean_roles(roles)
+    if "admin" in sanitized_roles and "tecnico" in sanitized_roles:
         return JsonResponse({"error":"admin y técnico son excluyentes"}, status=400)
 
-    _ensure_groups_exist()
+    rbac.ensure_groups_exist()
     user = get_user_model().objects.filter(pk=user_id).first()
     if not user:
         return JsonResponse({"error":"Usuario no existe"}, status=404)
+    try:
+        desired = rbac.assert_actor_can_manage(request.user, user, sanitized_roles)
+    except rbac.LastAdminRemovalError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except rbac.RolePermissionError as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
 
-    # No dejar el sistema sin admin
-    if "admin" not in roles:
-        hay_otro_admin = get_user_model().objects.filter(groups__name="admin").exclude(pk=user.pk).exists()
-        if not hay_otro_admin:
-            return JsonResponse({"error":"Debe quedar al menos un admin en el sistema"}, status=400)
-
-    # Normaliza y aplica
-    roles = [r for r in {str(r).strip() for r in roles} if r in ALLOWED_ROLE_NAMES]
-    # Limpia solo roles manejados
-    current = set(user.groups.values_list("name", flat=True))
-    manejados = current & ALLOWED_ROLE_NAMES
-    if manejados:
-        user.groups.remove(*Group.objects.filter(name__in=manejados))
-    if roles:
-        user.groups.add(*Group.objects.filter(name__in=roles))
+    applied = rbac.apply_roles(user, desired)
 
     TicketLog.objects.create(
         ticket=None,
         user=request.user if request.user.is_authenticated else None,
         action="permissions.updated",
         meta_json={
-            "target_user": user.username,
-            "roles": sorted(list(roles)),
+            "target_user": user.get_username(),
+            "roles": applied,
         },
         is_critical=True,
     )
 
-    return JsonResponse({"ok": True, "roles": list(user.groups.values_list("name", flat=True))})
+    return JsonResponse({"ok": True, "roles": applied})
 
 
 # --- HELPERS MÉTRICAS ---

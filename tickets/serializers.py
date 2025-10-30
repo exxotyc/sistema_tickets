@@ -2,16 +2,82 @@
 import hashlib
 import mimetypes
 
+from django.contrib.auth import get_user_model, password_validation
 from rest_framework import serializers
-from django.contrib.auth.models import User
 
+from . import rbac
 from .models import Ticket, Comment, Attachment, TicketLog, Category, FAQ
 
+UserModel = get_user_model()
+
+
 # ---------- Users ----------
-class UserSerializer(serializers.ModelSerializer):
+class UserSummarySerializer(serializers.ModelSerializer):
+    roles = serializers.SerializerMethodField()
+
     class Meta:
-        model = User
-        fields = ["id", "username", "email", "first_name", "last_name"]
+        model = UserModel
+        fields = [
+            "id",
+            "username",
+            "email",
+            "first_name",
+            "last_name",
+            "is_active",
+            "is_staff",
+            "roles",
+        ]
+
+    def get_roles(self, obj):
+        return rbac.user_managed_roles(obj)
+
+
+class UserAdminSerializer(UserSummarySerializer):
+    password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    roles = serializers.ListField(
+        child=serializers.CharField(), required=False, allow_empty=True
+    )
+
+    class Meta(UserSummarySerializer.Meta):
+        fields = UserSummarySerializer.Meta.fields + ["password"]
+
+    def validate_password(self, value):
+        if value:
+            password_validation.validate_password(value, self.instance or None)
+        return value
+
+    def validate_roles(self, value):
+        return rbac.clean_roles(value)
+
+    def create(self, validated_data):
+        roles = validated_data.pop("roles", [])
+        password = validated_data.pop("password", "")
+        if not password:
+            password = UserModel.objects.make_random_password()
+
+        user = UserModel(**validated_data)
+        user.set_password(password)
+        user.save()
+
+        rbac.apply_roles(user, roles)
+        return user
+
+    def update(self, instance, validated_data):
+        roles = validated_data.pop("roles", None)
+        password = validated_data.pop("password", "")
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        if password:
+            instance.set_password(password)
+
+        instance.save()
+
+        if roles is not None:
+            rbac.apply_roles(instance, roles)
+
+        return instance
 
 
 # ---------- Categories ----------
@@ -24,7 +90,7 @@ class CategorySerializer(serializers.ModelSerializer):
 
 # ---------- Attachments ----------
 class TicketAttachmentSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)
+    user = UserSummarySerializer(read_only=True)
     filename = serializers.CharField(source="file.name", read_only=True)
 
     class Meta:
@@ -143,7 +209,7 @@ class FAQSerializer(serializers.ModelSerializer):
 class TicketSerializer(serializers.ModelSerializer):
     # Campos relacionadas escribibles (PKs)
     assigned_to = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.all(),
+        queryset=UserModel.objects.all(),
         required=False,
         allow_null=True
     )
