@@ -141,21 +141,37 @@ document.addEventListener("DOMContentLoaded", function(){
     return String(s||"").replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",\"":"&quot;","'":"&#39;"}[m]));
   }
 
+  const storage = (() => {
+    try{
+      const probe = "__maint_users__";
+      window.localStorage.setItem(probe, "1");
+      window.localStorage.removeItem(probe);
+      return window.localStorage;
+    }catch(_){
+      const memory = new Map();
+      return {
+        getItem(key){ return memory.has(key) ? memory.get(key) : null; },
+        setItem(key, value){ memory.set(key, String(value)); },
+        removeItem(key){ memory.delete(key); },
+      };
+    }
+  })();
+
   let tokenPromise = null;
   let refreshPromise = null;
 
   function persistTokens(tokens){
     if(tokens && tokens.access){
-      localStorage.setItem("access_token", tokens.access);
+      storage.setItem("access_token", tokens.access);
     }
     if(tokens && tokens.refresh){
-      localStorage.setItem("refresh_token", tokens.refresh);
+      storage.setItem("refresh_token", tokens.refresh);
     }
   }
 
   function clearTokens(){
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("refresh_token");
+    storage.removeItem("access_token");
+    storage.removeItem("refresh_token");
   }
 
   async function fetchSessionTokens(){
@@ -183,13 +199,13 @@ document.addEventListener("DOMContentLoaded", function(){
     }else{
       await tokenPromise;
     }
-    return localStorage.getItem("access_token") || "";
+    return storage.getItem("access_token") || "";
   }
 
   async function refreshAccessToken(){
     if(!refreshPromise){
       refreshPromise = (async () => {
-        const refresh = localStorage.getItem("refresh_token");
+        const refresh = storage.getItem("refresh_token");
         if(!refresh){
           return fetchSessionTokens();
         }
@@ -216,11 +232,11 @@ document.addEventListener("DOMContentLoaded", function(){
     }else{
       await refreshPromise;
     }
-    return localStorage.getItem("access_token") || "";
+    return storage.getItem("access_token") || "";
   }
 
   async function ensureAccessToken(){
-    let token = localStorage.getItem("access_token") || "";
+    let token = storage.getItem("access_token") || "";
     if(token){
       return token;
     }
