@@ -12,7 +12,7 @@ from .views import (
     FAQViewSet,
     TicketLogViewSet,
     MyTokenObtainPairView,
-    UserReadOnlyViewSet,
+    UserViewSet,
     stats,
     CommentViewSet,
     AttachmentViewSet,
@@ -24,7 +24,7 @@ router.register(r"tickets", TicketViewSet, basename="tickets")
 router.register(r"categories", CategoryViewSet, basename="categories")
 router.register(r"logs", TicketLogViewSet, basename="logs")
 router.register(r"faqs", FAQViewSet, basename="faqs")
-router.register(r"users", UserReadOnlyViewSet, basename="users")
+router.register(r"users", UserViewSet, basename="users")
 router.register(r"comments", CommentViewSet, basename="comments")
 router.register(r"attachments", AttachmentViewSet, basename="attachments")
 
