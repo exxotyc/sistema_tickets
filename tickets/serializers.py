@@ -367,7 +367,7 @@ class TicketSerializer(serializers.ModelSerializer):
 
 # ---------- Logs ----------
 class TicketLogSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)
+    user = UserSummarySerializer(read_only=True)
     
     # Campo legible para la acción
     action_display = serializers.CharField(
