@@ -189,14 +189,21 @@ document.addEventListener("DOMContentLoaded", function(){
       sel.innerHTML = "";
       sel.appendChild(frag);
 
-      if(previous && rolesMap[String(previous)]){
+      const hasPrevious = previous && Object.prototype.hasOwnProperty.call(rolesMap, String(previous));
+      if(hasPrevious){
         sel.value = previous;
       }
 
       if(sel.value){
         sel.dispatchEvent(new Event("change"));
       }else{
-        sel.selectedIndex = 0;
+        const firstEnabled = Array.from(sel.options).find(opt => !opt.disabled);
+        if(firstEnabled){
+          firstEnabled.selected = true;
+          sel.dispatchEvent(new Event("change"));
+        }else if(sel.options.length){
+          sel.selectedIndex = 0;
+        }
       }
     }catch(_){ /* ignore network errors */ }
   }
