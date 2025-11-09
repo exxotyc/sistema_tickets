@@ -1,7 +1,13 @@
 import logging
-
+from datetime import timedelta
+from django.db import models
+from django.contrib.auth.models import User
+from django.utils.timezone import now
 from django.db import models
 from django.contrib.auth.models import User, Group
+
+from .services.sla import calculate_sla_status  # 👈 import del módulo SLA
+
 
 
 PRIORITY_CHOICES = [
@@ -18,28 +24,48 @@ STATE_CHOICES = [
     ("closed","Cerrado"),
 ]
 
+
 class Category(models.Model):
     name = models.CharField(max_length=50, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+from datetime import timedelta
+from django.db import models
+from django.contrib.auth.models import User
+from django.utils.timezone import now
+import logging
+
+from .services.sla import calculate_sla_status  # 👈 import del módulo SLA
+
 
 class Ticket(models.Model):
     title = models.CharField(max_length=200)
     description = models.TextField()
     requester = models.ForeignKey(User, related_name="tickets", on_delete=models.CASCADE)
     assigned_to = models.ForeignKey(User, related_name="assigned_tickets", null=True, blank=True, on_delete=models.SET_NULL)
-    category = models.ForeignKey(Category, null=True, blank=True, on_delete=models.SET_NULL)
+    category = models.ForeignKey("Category", null=True, blank=True, on_delete=models.SET_NULL)
     asset_id = models.CharField(max_length=120, null=True, blank=True, db_index=True)
-    priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default="medium")
-    state = models.CharField(max_length=20, choices=STATE_CHOICES, default="open")
+    priority = models.CharField(max_length=20, choices=[
+        ("low", "Baja"),
+        ("medium", "Media"),
+        ("high", "Alta"),
+    ], default="medium")
+    state = models.CharField(max_length=20, choices=[
+        ("open", "Abierto"),
+        ("in_progress", "En progreso"),
+        ("resolved", "Resuelto"),
+        ("closed", "Cerrado"),
+    ], default="open")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    attachment = models.FileField(upload_to="attachments/%Y/%m/", null=True, blank=True)  # <- así
-    frt_due_at = models.DateTimeField(null=True, blank=True)       # vencimiento 1ª respuesta
-    resolve_due_at = models.DateTimeField(null=True, blank=True)   # vencimiento resolución
+    attachment = models.FileField(upload_to="attachments/%Y/%m/", null=True, blank=True)
+    frt_due_at = models.DateTimeField(null=True, blank=True)
+    resolve_due_at = models.DateTimeField(null=True, blank=True)
     sla_minutes = models.PositiveIntegerField(null=True, blank=True)
     due_at = models.DateTimeField(null=True, blank=True)
     breach_risk = models.BooleanField(default=False)
 
+    # --- Control de transición de estados ---
     STATE_TRANSITIONS = {
         "open": {"in_progress"},
         "in_progress": {"open", "resolved"},
@@ -51,9 +77,7 @@ class Ticket(models.Model):
         def __init__(self, current_state, new_state):
             self.current_state = current_state
             self.new_state = new_state
-            super().__init__(
-                f"Transición inválida {current_state} → {new_state}."
-            )
+            super().__init__(f"Transición inválida {current_state} → {new_state}.")
 
     def can_transition_to(self, new_state):
         if new_state == self.state:
@@ -62,7 +86,6 @@ class Ticket(models.Model):
 
     def change_state(self, new_state, *, by=None, force=False):
         """Modifica el estado validando la transición y agendando el log."""
-
         if new_state == self.state:
             return False
 
@@ -100,6 +123,8 @@ class Ticket(models.Model):
             state_to = self.state
 
         if state_from is not None and state_from != state_to:
+            from .models import TicketLog  # Evita import circular
+
             TicketLog.objects.create(
                 ticket=self,
                 user=context.get("user") if context else None,
@@ -108,7 +133,6 @@ class Ticket(models.Model):
             )
             try:
                 from .notifications import notify_ticket_state_change
-
                 notify_ticket_state_change(
                     self,
                     state_from,
@@ -116,17 +140,50 @@ class Ticket(models.Model):
                     context.get("user") if context else None,
                 )
             except Exception:
-                # Las notificaciones no deben impedir el guardado del ticket.
                 logging.getLogger("tickets.notifications").exception(
                     "Fallo al enviar notificación de cambio de estado"
                 )
 
+        # 🔁 Actualiza estado SLA automáticamente en cada guardado
+        try:
+            self.update_sla_status()
+        except Exception:
+            logging.getLogger("tickets.sla").exception(
+                f"Error al evaluar SLA para ticket {self.id}"
+            )
+
         if hasattr(self, "_state_change_context"):
             self._state_change_context = None
 
+    # --- 🔒 Evaluación SLA ---
+    def update_sla_status(self):
+        """
+        Calcula si el ticket está en riesgo de incumplir su SLA.
+        Se basa en la prioridad y tiempo transcurrido desde su creación.
+        """
+        sla = calculate_sla_status(self)
+        self.breach_risk = sla["breach_risk"]
+        self.save(update_fields=["breach_risk"])
+        return sla
+
+    def get_sla_label(self):
+        """
+        Retorna una etiqueta legible para el estado SLA (para templates).
+        """
+        from .services.sla import calculate_sla_status
+        data = calculate_sla_status(self)
+
+        if data["breached"]:
+            return ("Vencido", "danger", "🔴")
+        elif data["nearing_breach"]:
+            return ("En riesgo", "warning", "🟡")
+        else:
+            return ("En tiempo", "success", "🟢")
 
     def __str__(self):
         return f"#{self.id} {self.title}"
+
+
 
 class TicketLog(models.Model):
     ticket = models.ForeignKey(Ticket, related_name="logs", null=True, blank=True, on_delete=models.CASCADE)
@@ -204,3 +261,5 @@ class Section(models.Model):
 
     def __str__(self):
         return self.title
+    
+

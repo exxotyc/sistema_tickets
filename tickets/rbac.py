@@ -11,7 +11,7 @@ MANAGED_ROLE_NAMES: Set[str] = {"admin", "tecnico", "usuario"}
 ROLE_LABELS = {
     "admin": "Admin",
     "tecnico": "Técnico",
-    "usuario": "Usuario",
+    "solicitante": "Usuario",
 }
 
 # Roles that allow managing other roles.

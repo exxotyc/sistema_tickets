@@ -3,7 +3,12 @@
 
 {% block extra_head %}
 <style>
-  .glass{background:rgba(255,255,255,.92); backdrop-filter:blur(6px); border:1px solid rgba(15,23,42,.06); border-radius:1rem}
+  .glass {
+    background: rgba(255,255,255,.92);
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(15,23,42,.06);
+    border-radius: 1rem;
+  }
 </style>
 {% endblock %}
 
@@ -23,10 +28,14 @@
       <label class="form-label">Título</label>
       <input id="title" class="form-control" required maxlength="200">
     </div>
+
     <div class="col-12">
       <label class="form-label">Descripción</label>
       <textarea id="description" class="form-control" rows="5" required></textarea>
     </div>
+
+    {# ⚙️ Campo de prioridad visible solo para admin/tecnico #}
+    {% if is_admin_or_tecnico %}
     <div class="col-md-6">
       <label class="form-label">Prioridad</label>
       <select id="priority" class="form-select">
@@ -35,15 +44,22 @@
         <option value="high">Alta</option>
       </select>
     </div>
+    {% endif %}
+
     <div class="col-md-6">
       <label class="form-label">Categoría</label>
       <select id="category" class="form-select">
         <option value="">Sin categoría</option>
       </select>
     </div>
+
     <div class="col-12 d-flex gap-2">
-      <button class="btn btn-primary btn-ripple" type="submit"><i class="bi bi-save"></i> Crear</button>
-      <button class="btn btn-outline-secondary btn-ripple" type="button" id="btnCancel">Cancelar</button>
+      <button class="btn btn-primary btn-ripple" type="submit">
+        <i class="bi bi-save"></i> Crear
+      </button>
+      <button class="btn btn-outline-secondary btn-ripple" type="button" id="btnCancel">
+        Cancelar
+      </button>
     </div>
     <div id="msg" class="form-text"></div>
   </form>
@@ -66,7 +82,8 @@
       body: JSON.stringify({ refresh })
     });
     if(!rr.ok){ localStorage.clear(); location.assign("/"); return; }
-    const data = await rr.json(); localStorage.setItem("access_token", data.access);
+    const data = await rr.json();
+    localStorage.setItem("access_token", data.access);
   }
 })();
 </script>
@@ -81,7 +98,6 @@ function authHeaders(){
 async function api(url, opts={}){
   const r = await fetch(url, { ...opts, headers:{ ...(opts.headers||{}), ...authHeaders(), "Content-Type":"application/json" }});
   if(r.status!==401) return r;
-  // refresh
   const refresh = localStorage.getItem("refresh_token");
   if(!refresh){ localStorage.clear(); location.assign("/"); return null; }
   const rr = await fetch("/api/token/refresh/", {
@@ -117,15 +133,23 @@ document.getElementById("frmNew").addEventListener("submit", async (e)=>{
   e.preventDefault();
   const msg = document.getElementById("msg");
   msg.textContent = "";
+
+  // Si el campo prioridad no existe (es solicitante), la fuerza a "medium"
+  const priorityField = document.getElementById("priority");
+  const priority = priorityField ? priorityField.value : "medium";
+
   const payload = {
     title: document.getElementById("title").value.trim(),
     description: document.getElementById("description").value.trim(),
-    priority: document.getElementById("priority").value,
+    priority: priority,
     category: document.getElementById("category").value || null,
   };
+
   if(!payload.title || !payload.description){
-    msg.textContent="Completa título y descripción."; msg.className="form-text text-danger"; return;
+    msg.textContent="Completa título y descripción.";
+    msg.className="form-text text-danger"; return;
   }
+
   const r = await api("/api/tickets/", { method:"POST", body: JSON.stringify(payload) });
   if(!r || !r.ok){
     let txt="No se pudo crear.";

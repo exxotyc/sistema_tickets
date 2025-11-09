@@ -1,248 +1,264 @@
 {% extends "tickets/base.html" %}
-{% block title %}Roles · Mantenedor{% endblock %}
+{% block title %}Mantenedor · Roles{% endblock %}
 
 {% block extra_head %}
 <style>
-  .card-callout{border-left:4px solid #dc3545;background:#fff}
-  .role-grid{display:flex;gap:1rem;flex-wrap:wrap}
-  .role-grid .form-check{min-width:110px}
-  .role-grid .form-check.text-muted label{cursor:not-allowed}
+  .glass {
+    background: rgba(255,255,255,.92);
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(15,23,42,.06);
+    border-radius: 1rem;
+    box-shadow: 0 6px 20px rgba(0,0,0,.05);
+    padding: 1.5rem;
+  }
+  .tag { font-size:.75rem; }
+  .table-hover tbody tr:hover { background: #f8fafc; }
+  .fade-in { animation: fadeIn .5s ease; }
+  @keyframes fadeIn { from {opacity:0; transform: translateY(5px);} to {opacity:1; transform: translateY(0);} }
+  .role-badge { cursor: pointer; transition: .25s; }
+  .role-badge:hover { transform: scale(1.05); }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="card shadow-sm">
-  <div class="card-body p-4">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-      <h5 class="m-0"><i class="bi bi-people-gear me-2"></i>Asignación de roles</h5>
-      <a href="{% url 'maint_index' %}" class="btn btn-outline-secondary btn-sm">Volver</a>
-    </div>
+<div class="glass fade-in">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h5 m-0 d-flex align-items-center gap-2"><i class="bi bi-shield-lock"></i> Mantenedor de Roles</h1>
+    <a class="btn btn-outline-secondary btn-sm btn-ripple" href="{% url 'maint_index' %}">
+      <i class="bi bi-arrow-left"></i> Volver
+    </a>
+  </div>
 
-    <div class="card card-callout mb-3">
-      <div class="card-body py-3">
-        <ul class="m-0 ps-3 small">
-          <li>No dejes el sistema sin al menos <strong>un admin</strong>.</li>
-          <li><strong>Admin</strong> y <strong>Técnico</strong> son excluyentes.</li>
-          <li><strong>Usuario</strong> es opcional y puede coexistir.</li>
-          {% if allowed_roles and managed_roles and allowed_roles|length < managed_roles|length %}
-            <li>Solo puedes modificar: {{ allowed_roles|join:', ' }}.</li>
-          {% endif %}
-        </ul>
-      </div>
-    </div>
+  <div class="input-group mb-3">
+    <span class="input-group-text"><i class="bi bi-search"></i></span>
+    <input id="search" type="text" class="form-control" placeholder="Buscar usuario por nombre, correo o rol...">
+    <button id="btnReload" class="btn btn-outline-secondary"><i class="bi bi-arrow-clockwise"></i></button>
+  </div>
 
-    <form id="roleForm" class="row g-3">
-      <div class="col-12 col-md-6">
-        <label class="form-label">Usuario</label>
-        <select id="userSelect" class="form-select" required>
-          <option value="" selected disabled>Selecciona usuario…</option>
-          {% for u in users %}
-            <option value="{{ u.id }}">{{ u.username }}</option>
-          {% endfor %}
-        </select>
-      </div>
+  <div id="globalMsg" class="alert d-none" role="alert"></div>
 
-      <div class="col-12 col-md-6">
-        <label class="form-label">Roles</label>
-        <div class="role-grid" id="rolesGrid">
-          {% for option in role_options %}
-            <div class="form-check">
-              <input class="form-check-input role-checkbox" type="checkbox" id="r_{{ option.code }}" value="{{ option.code }}">
-              <label class="form-check-label" for="r_{{ option.code }}">{{ option.label }}</label>
-            </div>
-          {% endfor %}
-        </div>
-        <div class="form-text">Admin y Técnico no pueden coexistir.</div>
-      </div>
+  <div class="table-responsive">
+    <table class="table table-hover align-middle" id="rolesTable">
+      <thead class="table-light">
+        <tr>
+          <th style="width:90px">ID</th>
+          <th>Usuario</th>
+          <th>Correo</th>
+          <th style="width:140px">Staff</th>
+          <th style="width:260px">Roles actuales</th>
+          <th style="width:150px" class="text-end">Acciones</th>
+        </tr>
+      </thead>
+      <tbody id="rows">
+        <tr><td colspan="6" class="text-center text-muted py-4">Cargando usuarios…</td></tr>
+      </tbody>
+    </table>
+  </div>
 
-      <div class="col-12">
-        <button id="btnSave" type="submit" class="btn btn-primary btn-ripple">
-          <i class="bi bi-save me-1"></i>Guardar
-        </button>
-        <span id="msg" class="ms-2 small text-muted"></span>
-      </div>
-    </form>
+  <div class="alert alert-info mt-3 small">
+    <i class="bi bi-info-circle"></i> Recuerda: <strong>Admin</strong> y <strong>Técnico</strong> no pueden coexistir.  
+    Debe existir al menos un <strong>usuario con rol Admin</strong> activo en el sistema.
   </div>
 </div>
 
-{# Embed seguro de roles sin json_script: JSON en data-attribute #}
-<div id="rolesMapSrc" data-rolesmap='{{ roles_map_json|escapejs }}' hidden></div>
-<div id="rbacInfo"
-     data-allowed='{{ allowed_roles_json|default:"[]"|escapejs }}'
-     data-managed='{{ managed_roles_json|default:"[]"|escapejs }}'
-     data-labels='{{ role_labels_json|default:"{}"|escapejs }}'
-     data-can-staff='{{ can_manage_staff|yesno:"true,false" }}'
-     hidden></div>
+<!-- Modal -->
+<div class="modal fade" id="rolesModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-md modal-dialog-centered">
+    <div class="modal-content">
+      <form id="rolesForm">
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bi bi-person-gear"></i> Editar roles</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <div id="formMsg" class="alert alert-danger d-none small"></div>
+          <p class="fw-semibold mb-2" id="modalUser"></p>
+          <div id="rolesBox" class="d-flex flex-wrap gap-2"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary btn-ripple" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary btn-ripple" id="saveBtn">Guardar cambios</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-document.addEventListener("DOMContentLoaded", function(){
-  const sel   = document.getElementById("userSelect");
-  const admin = document.getElementById("r_admin");
-  const tec   = document.getElementById("r_tecnico");
-  const usr   = document.getElementById("r_usuario");
-  const msg   = document.getElementById("msg");
-  const btn   = document.getElementById("btnSave");
-  const roleCheckboxes = Array.from(document.querySelectorAll(".role-checkbox"));
-  const infoEl = document.getElementById("rbacInfo");
+document.addEventListener("DOMContentLoaded", async () => {
+  const rows = document.getElementById("rows");
+  const search = document.getElementById("search");
+  const msg = document.getElementById("globalMsg");
+  const modalEl = document.getElementById("rolesModal");
+  const modal = new bootstrap.Modal(modalEl);
+  const form = document.getElementById("rolesForm");
+  const rolesBox = document.getElementById("rolesBox");
+  const modalUser = document.getElementById("modalUser");
+  const formMsg = document.getElementById("formMsg");
+  const saveBtn = document.getElementById("saveBtn");
+  const btnReload = document.getElementById("btnReload");
 
-  let allowedRoles = [];
-  let managedRoles = [];
-  let roleLabels = {};
-  if(infoEl){
-    try{ allowedRoles = JSON.parse(infoEl.dataset.allowed || "[]"); }catch(_){ allowedRoles = []; }
-    try{ managedRoles = JSON.parse(infoEl.dataset.managed || "[]"); }catch(_){ managedRoles = []; }
-    try{ roleLabels = JSON.parse(infoEl.dataset.labels || "{}"); }catch(_){ roleLabels = {}; }
+  const roleLabels = JSON.parse('{{ role_labels_json|default:"{}"|escapejs }}');
+  const managedRoles = JSON.parse('{{ managed_roles_json|default:"[]"|escapejs }}');
+
+  let users = [];
+  let currentUser = null;
+
+  function showMsg(text, ok=true){
+    msg.className = "alert alert-" + (ok ? "success" : "danger");
+    msg.textContent = text;
+    msg.classList.remove("d-none");
+    setTimeout(()=>msg.classList.add("d-none"), 3000);
   }
-  const allowedSet = new Set(allowedRoles);
 
-  // Carga mapa { "<id>":["admin","usuario"], ... } desde data-attribute
-  let rolesMap = {};
-  try{
-    const raw = document.getElementById("rolesMapSrc").dataset.rolesmap || "{}";
-    rolesMap = JSON.parse(raw);
-  }catch(_){ rolesMap = {}; }
-
-  roleCheckboxes.forEach(cb => {
-    const role = cb.value;
-    const allowed = allowedSet.has(role);
-    cb.dataset.locked = allowed ? "0" : "1";
-    cb.disabled = !allowed;
-    if(!allowed){
-      cb.title = "No tienes permiso para modificar este rol.";
-      cb.closest(".form-check").classList.add("text-muted");
-    }
-  });
-
-  function setMsg(text, ok){
-    msg.textContent = text || "";
-    msg.className = "ms-2 small " + (ok===true ? "text-success" : ok===false ? "text-danger" : "text-muted");
-  }
-  function reset(){
-    roleCheckboxes.forEach(cb => {
-      cb.checked = false;
-      cb.disabled = cb.dataset.locked === "1";
+  function buildRoleChecks(selectedRoles){
+    rolesBox.innerHTML = "";
+    managedRoles.forEach(r => {
+      const div = document.createElement("div");
+      div.className = "form-check";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.className = "form-check-input";
+      cb.id = "role_" + r;
+      cb.value = r;
+      cb.checked = (selectedRoles || []).includes(r);
+      cb.addEventListener("change", enforceExclusiveRoles);
+      const label = document.createElement("label");
+      label.className = "form-check-label";
+      label.setAttribute("for", cb.id);
+      label.textContent = roleLabels[r] || (r.charAt(0).toUpperCase() + r.slice(1));
+      div.appendChild(cb);
+      div.appendChild(label);
+      rolesBox.appendChild(div);
     });
   }
-  function enforceExclusion(){
-    const adminLocked = admin.dataset.locked === "1";
-    const tecLocked = tec.dataset.locked === "1";
 
-    if(admin.checked){
-      tec.checked = false;
-      if(!tecLocked){ tec.disabled = true; }
-    }else if(!tecLocked){
-      tec.disabled = false;
+  function enforceExclusiveRoles(){
+    const admin = rolesBox.querySelector("#role_admin");
+    const tec = rolesBox.querySelector("#role_tecnico");
+    if(admin && tec){
+      if(admin.checked) tec.checked = false;
+      if(tec.checked) admin.checked = false;
     }
-
-    if(tec.checked){
-      admin.checked = false;
-      if(!adminLocked){ admin.disabled = true; }
-    }else if(!adminLocked){
-      admin.disabled = false;
-    }
-
-    if(adminLocked){ admin.disabled = true; }
-    if(tecLocked){ tec.disabled = true; }
   }
-  admin.addEventListener("change", enforceExclusion);
-  tec.addEventListener("change", enforceExclusion);
 
-  sel.addEventListener("change", ()=>{
-    reset(); setMsg("", null);
-    const uid = sel.value;
-    const roles = rolesMap[String(uid)] || [];
-    roles.forEach(r=>{
-      if(r==="admin")   admin.checked = true;
-      if(r==="tecnico") tec.checked   = true;
-      if(r==="usuario") usr.checked   = true;
+  async function loadUsers(){
+    rows.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Cargando usuarios…</td></tr>';
+    try {
+      const url = "{% url 'roles_data' %}";
+      const response = await fetch(url);
+      const data = await response.json();
+
+      if(!data || !Array.isArray(data.users)){
+        rows.innerHTML = '<tr><td colspan="6" class="text-center text-warning py-4">Sin usuarios disponibles</td></tr>';
+        return;
+      }
+
+      users = data.users;
+      render(users);
+    } catch (err) {
+      rows.innerHTML = '<tr><td colspan="6" class="text-center text-danger py-4">Error al cargar usuarios</td></tr>';
+    }
+  }
+
+  function render(list){
+    if(!list.length){
+      rows.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Sin resultados</td></tr>';
+      return;
+    }
+    rows.innerHTML = "";
+    list.forEach(u => {
+      const rolesBadges = (u.roles || []).map(r =>
+        `<span class="badge text-bg-light tag">${roleLabels[r] || r}</span>`
+      ).join("") || '<span class="text-muted">—</span>';
+      const tr = document.createElement("tr");
+      tr.dataset.userId = u.id;
+      tr.innerHTML = `
+        <td>${u.id}</td>
+        <td>${u.username}</td>
+        <td>${u.email || '<span class="text-muted">—</span>'}</td>
+        <td>${u.is_staff ? '<span class="badge text-bg-primary tag">Sí</span>' : '<span class="badge text-bg-secondary tag">No</span>'}</td>
+        <td class="roles-cell">${rolesBadges}</td>
+        <td class="text-end">
+          <button class="btn btn-outline-primary btn-sm btn-ripple" data-id="${u.id}">
+            <i class="bi bi-pencil-square"></i> Editar
+          </button>
+        </td>`;
+      rows.appendChild(tr);
     });
-    enforceExclusion();
+  }
+
+  search.addEventListener("input", ()=>{
+    const term = search.value.toLowerCase();
+    const filtered = users.filter(u =>
+      (u.username||"").toLowerCase().includes(term) ||
+      (u.email||"").toLowerCase().includes(term) ||
+      (u.roles||[]).join(" ").toLowerCase().includes(term)
+    );
+    render(filtered);
   });
 
-  async function refreshUsers(){
-    try{
-      const response = await fetch("{% url 'roles_data' %}");
-      if(!response.ok) return;
-      const payload = await response.json();
-      const list = Array.isArray(payload.users) ? payload.users : [];
-      const previous = sel.value;
+  rows.addEventListener("click", ev=>{
+    const btn = ev.target.closest("button[data-id]");
+    if(!btn) return;
+    const id = btn.dataset.id;
+    currentUser = users.find(x=>String(x.id)===String(id));
+    if(!currentUser) return;
+    modalUser.textContent = `${currentUser.username}${currentUser.email ? ` (${currentUser.email})` : ""}`;
+    buildRoleChecks(currentUser.roles || []);
+    formMsg.classList.add("d-none");
+    modal.show();
+  });
 
-      const frag = document.createDocumentFragment();
-      const placeholder = document.createElement("option");
-      placeholder.value = "";
-      placeholder.disabled = true;
-      placeholder.selected = true;
-      placeholder.textContent = "Selecciona usuario…";
-      frag.appendChild(placeholder);
+  form.addEventListener("submit", async (e)=>{
+    e.preventDefault();
+    if(!currentUser) return;
 
-      rolesMap = {};
-      list.forEach(item => {
-        const opt = document.createElement("option");
-        opt.value = item.id;
-        opt.textContent = item.username || item.raw_username || `#${item.id}`;
-        frag.appendChild(opt);
-        rolesMap[String(item.id)] = Array.isArray(item.roles) ? item.roles : [];
-      });
-
-      sel.innerHTML = "";
-      sel.appendChild(frag);
-
-      const hasPrevious = previous && Object.prototype.hasOwnProperty.call(rolesMap, String(previous));
-      if(hasPrevious){
-        sel.value = previous;
-      }
-
-      if(sel.value){
-        sel.dispatchEvent(new Event("change"));
-      }else{
-        const firstEnabled = Array.from(sel.options).find(opt => !opt.disabled);
-        if(firstEnabled){
-          firstEnabled.selected = true;
-          sel.dispatchEvent(new Event("change"));
-        }else if(sel.options.length){
-          sel.selectedIndex = 0;
-        }
-      }
-    }catch(_){ /* ignore network errors */ }
-  }
-
-  document.getElementById("roleForm").addEventListener("submit", async (ev)=>{
-    ev.preventDefault(); setMsg("", null);
-    const uid = sel.value;
-    if(!uid){ setMsg("Selecciona un usuario.", false); return; }
-
-    const roles = [];
-    if(admin.checked) roles.push("admin");
-    if(tec.checked)   roles.push("tecnico");
-    if(usr.checked)   roles.push("usuario");
-    if(roles.includes("admin") && roles.includes("tecnico")){
-      setMsg("No puedes combinar admin y técnico.", false);
+    const selected = Array.from(rolesBox.querySelectorAll("input[type=checkbox]:checked")).map(c=>c.value);
+    if(selected.includes("admin") && selected.includes("tecnico")){
+      formMsg.textContent = "Admin y Técnico no pueden coexistir.";
+      formMsg.classList.remove("d-none");
       return;
     }
 
-    btn.disabled = true;
-    try{
-      const r = await fetch("{% url 'maint_roles_set' %}", {
-        method:"POST",
-        headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ user_id: Number(uid), roles })
-      });
-      const data = await r.json().catch(()=>({}));
-      if(!r.ok){
-        setMsg(data.error || "Error al guardar", false);
-      }else{
-        rolesMap[String(uid)] = data.roles || [];
-        setMsg("Roles actualizados.", true);
-        await refreshUsers();
-      }
-    }catch(_){ setMsg("Fallo de red.", false); }
-    finally{ btn.disabled = false; }
+    const payload = { user_id: currentUser.id, roles: selected };
+    saveBtn.disabled = true;
+    formMsg.classList.add("d-none");
+
+    const res = await fetch("{% url 'roles_update' %}", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": "{{ csrf_token }}" },
+      body: JSON.stringify(payload)
+    });
+    const j = await res.json().catch(()=>({}));
+
+    saveBtn.disabled = false;
+
+    if(!res.ok || j.ok === false){
+      formMsg.textContent = j.error || "Error al guardar cambios.";
+      formMsg.classList.remove("d-none");
+      return;
+    }
+
+    // ✅ Si el backend no devuelve roles, asumimos solicitante
+    const updatedRoles = j.roles && j.roles.length ? j.roles : ["Usuario"];
+    currentUser.roles = updatedRoles;
+
+    const tr = document.querySelector(`#rows tr[data-user-id="${currentUser.id}"] .roles-cell`);
+    if(tr){
+      tr.innerHTML = updatedRoles.map(r =>
+        `<span class="badge text-bg-light tag">${roleLabels[r] || r}</span>`
+      ).join("");
+    }
+
+    showMsg(`Roles de ${currentUser.username} actualizados ✅`, true);
+    bootstrap.Modal.getInstance(modalEl).hide();
   });
 
-  if(sel.options.length > 1){ sel.selectedIndex = 1; sel.dispatchEvent(new Event("change")); }
-  refreshUsers();
+  btnReload.addEventListener("click", loadUsers);
+  await loadUsers();
 });
 </script>
 {% endblock %}

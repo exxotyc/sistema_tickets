@@ -5,15 +5,18 @@
 <style>
   .glass{background:rgba(255,255,255,.92);backdrop-filter:blur(6px);border:1px solid rgba(15,23,42,.06);border-radius:1rem}
   .tag{font-size:.75rem}
+  .table-hover tbody tr:hover{background:#f8fafc}
+  .fade-in{animation:fadeIn .4s ease}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="glass p-3 p-md-4">
+<div class="glass p-3 p-md-4 fade-in">
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h5 m-0 d-flex align-items-center gap-2"><i class="bi bi-people"></i> Usuarios</h1>
     <div class="d-flex gap-2">
-      <button id="btnNew" class="btn btn-primary btn-sm btn-ripple"><i class="bi bi-plus-lg me-1"></i>Nuevo usuario</button>
+      <button id="btnNew" class="btn btn-primary btn-sm btn-ripple"><i class="bi bi-plus-lg me-1"></i>Nuevo</button>
       <button id="btnReload" class="btn btn-outline-secondary btn-sm btn-ripple"><i class="bi bi-arrow-clockwise me-1"></i>Recargar</button>
       <a class="btn btn-outline-secondary btn-sm btn-ripple" href="{% url 'maint_index' %}">Volver</a>
     </div>
@@ -21,7 +24,7 @@
 
   <div class="input-group mb-3">
     <span class="input-group-text"><i class="bi bi-search"></i></span>
-    <input id="q" class="form-control" placeholder="Buscar usuario…">
+    <input id="q" class="form-control" placeholder="Buscar usuario, correo o rol…">
   </div>
 
   <div id="globalMsg" class="alert d-none" role="alert"></div>
@@ -29,34 +32,37 @@
   <div class="table-responsive">
     <table class="table table-hover align-middle">
       <thead class="table-light">
-        <tr>
-          <th style="width:90px">ID</th>
-          <th>Usuario</th>
-          <th>Nombre</th>
-          <th style="width:120px">Activo</th>
-          <th style="width:120px">Staff</th>
-          <th style="width:240px">Roles</th>
-          <th style="width:150px" class="text-end">Acciones</th>
-        </tr>
+      <tr>
+        <th style="width:80px">ID</th>
+        <th>Usuario</th>
+        <th>Nombre</th>
+        <th>Correo</th>
+        <th style="width:110px">Activo</th>
+        <th style="width:110px">Staff</th>
+        <th style="width:260px">Roles</th>
+        <th class="text-end" style="width:160px">Acciones</th>
+      </tr>
       </thead>
       <tbody id="rows">
-        <tr><td colspan="7" class="text-center text-muted py-4">Cargando…</td></tr>
+        <tr><td colspan="8" class="text-center text-muted py-4">Cargando…</td></tr>
       </tbody>
     </table>
   </div>
 
   <div class="alert alert-info mt-3">
-    Recuerda que <strong>Admin</strong> y <strong>Técnico</strong> no pueden coexistir. Debe quedar siempre al menos un usuario con rol <strong>admin</strong> en el sistema.
+    Recuerda: <strong>admin</strong> y <strong>técnico</strong> no pueden coexistir en un mismo usuario.
+    Debe quedar al menos <strong>un admin</strong> en el sistema.
   </div>
 </div>
 
+<!-- Contexto RBAC desde la vista maint_section -->
 <div id="rbacInfo"
      data-allowed='{{ allowed_roles_json|default:"[]"|escapejs }}'
-     data-managed='{{ managed_roles_json|default:"[]"|escapejs }}'
      data-role-options='{{ role_options_json|default:"[]"|escapejs }}'
      data-can-staff='{{ can_manage_staff|yesno:"true,false" }}'
      hidden></div>
 
+<!-- Modal crear/editar -->
 <div class="modal fade" id="userModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-centered">
     <div class="modal-content">
@@ -66,53 +72,53 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
         </div>
         <div class="modal-body">
-          <div id="formAlert" class="alert alert-danger d-none" role="alert"></div>
+          <div id="formAlert" class="alert alert-danger d-none small"></div>
           <div class="row g-3">
             <div class="col-md-6">
-              <label for="field_username" class="form-label">Usuario</label>
-              <input id="field_username" type="text" class="form-control" required>
+              <label class="form-label">Usuario</label>
+              <input id="f_username" type="text" class="form-control" required>
             </div>
             <div class="col-md-6">
-              <label for="field_email" class="form-label">Correo electrónico</label>
-              <input id="field_email" type="email" class="form-control" placeholder="usuario@ejemplo.cl">
+              <label class="form-label">Correo</label>
+              <input id="f_email" type="email" class="form-control" placeholder="usuario@ejemplo.cl">
             </div>
             <div class="col-md-6">
-              <label for="field_first_name" class="form-label">Nombre</label>
-              <input id="field_first_name" type="text" class="form-control">
+              <label class="form-label">Nombre</label>
+              <input id="f_first_name" type="text" class="form-control">
             </div>
             <div class="col-md-6">
-              <label for="field_last_name" class="form-label">Apellido</label>
-              <input id="field_last_name" type="text" class="form-control">
+              <label class="form-label">Apellido</label>
+              <input id="f_last_name" type="text" class="form-control">
             </div>
             <div class="col-md-6">
-              <label for="field_password" class="form-label">Contraseña</label>
-              <input id="field_password" type="password" class="form-control" autocomplete="new-password">
-              <div class="form-text">Deja en blanco para mantener la actual.</div>
+              <label class="form-label">Contraseña</label>
+              <input id="f_password" type="password" class="form-control" autocomplete="new-password">
+              <div class="form-text">Dejar en blanco para mantener (en edición).</div>
             </div>
             <div class="col-md-6">
               <div class="form-check form-switch mt-4">
-                <input class="form-check-input" type="checkbox" id="field_active" checked>
-                <label class="form-check-label" for="field_active">Usuario activo</label>
+                <input class="form-check-input" type="checkbox" id="f_active" checked>
+                <label class="form-check-label" for="f_active">Usuario activo</label>
               </div>
               {% if can_manage_staff %}
-                <div class="form-check form-switch mt-2">
-                  <input class="form-check-input" type="checkbox" id="field_staff">
-                  <label class="form-check-label" for="field_staff">Staff</label>
-                </div>
+              <div class="form-check form-switch mt-2">
+                <input class="form-check-input" type="checkbox" id="f_staff">
+                <label class="form-check-label" for="f_staff">Staff</label>
+              </div>
               {% else %}
-                <div class="form-text text-muted">No puedes modificar el estado de staff.</div>
+              <div class="form-text text-muted">No tienes permisos para cambiar “staff”.</div>
               {% endif %}
             </div>
             <div class="col-12">
               <label class="form-label">Roles</label>
-              <div id="roleCheckboxes" class="d-flex flex-wrap gap-3"></div>
-              <div class="form-text">Admin y Técnico son excluyentes.</div>
+              <div id="roleChecks" class="d-flex flex-wrap gap-3"></div>
+              <div class="form-text">admin y técnico son excluyentes.</div>
             </div>
           </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-outline-secondary btn-ripple" data-bs-dismiss="modal">Cancelar</button>
-          <button type="submit" class="btn btn-primary btn-ripple" id="modalSaveBtn">Guardar</button>
+          <button type="submit" class="btn btn-primary btn-ripple" id="saveBtn">Guardar</button>
         </div>
       </form>
     </div>
@@ -120,157 +126,32 @@
 </div>
 {% endblock %}
 
-
 {% block extra_js %}
 <script>
-document.addEventListener("DOMContentLoaded", function(){
-  const API_BASE = "/api/users/";
-
-  const infoEl = document.getElementById("rbacInfo");
-  let allowedRoles = [];
-  let roleOptions = [];
-  let canManageStaff = false;
-  if(infoEl){
-    try{ allowedRoles = JSON.parse(infoEl.dataset.allowed || "[]"); }catch(_){ allowedRoles = []; }
-    try{ roleOptions = JSON.parse(infoEl.dataset.roleOptions || "[]"); }catch(_){ roleOptions = []; }
-    canManageStaff = infoEl.dataset.canStaff === "true";
-  }
-  const allowedSet = new Set(allowedRoles);
-
-  function esc(s){
-    return String(s||"").replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",\"":"&quot;","'":"&#39;"}[m]));
-  }
-
-  const storage = (() => {
-    try{
-      const probe = "__maint_users__";
-      window.localStorage.setItem(probe, "1");
-      window.localStorage.removeItem(probe);
-      return window.localStorage;
-    }catch(_){
-      const memory = new Map();
-      return {
-        getItem(key){ return memory.has(key) ? memory.get(key) : null; },
-        setItem(key, value){ memory.set(key, String(value)); },
-        removeItem(key){ memory.delete(key); },
-      };
-    }
-  })();
-
-  let tokenPromise = null;
-  let refreshPromise = null;
-
-  function persistTokens(tokens){
-    if(tokens && tokens.access){
-      storage.setItem("access_token", tokens.access);
-    }
-    if(tokens && tokens.refresh){
-      storage.setItem("refresh_token", tokens.refresh);
+(function(){
+  // ----- Helpers JWT -> apiFetch (igual que en otras páginas) -----
+  if(typeof window.apiFetch!=="function"){
+    window.apiFetch = async function(url, opts={}){
+      const access = localStorage.getItem("access_token");
+      const finalUrl = url.startsWith("http") ? url : url.startsWith("/api") ? url : "/api"+url;
+      const r = await fetch(finalUrl, { ...opts, headers:{...(opts.headers||{}), Authorization:"Bearer "+access }});
+      if(r.status !== 401) return r;
+      const refresh = localStorage.getItem("refresh_token");
+      if(!refresh){ localStorage.clear(); location.assign("{% url 'login' %}"); return null; }
+      const rr = await fetch("/api/token/refresh/", {
+        method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ refresh })
+      });
+      if(!rr.ok){ localStorage.clear(); location.assign("{% url 'login' %}"); return null; }
+      const data = await rr.json();
+      localStorage.setItem("access_token", data.access);
+      return fetch(finalUrl, { ...opts, headers:{...(opts.headers||{}), Authorization:"Bearer "+data.access }});
     }
   }
 
-  function clearTokens(){
-    storage.removeItem("access_token");
-    storage.removeItem("refresh_token");
-  }
-
-  async function fetchSessionTokens(){
-    if(!tokenPromise){
-      tokenPromise = (async () => {
-        try{
-          const response = await fetch("/api/token/session/", {
-            method: "POST",
-            headers: {"X-CSRFToken": typeof getCookie === "function" ? getCookie("csrftoken") : ""},
-          });
-          if(response.ok){
-            const data = await response.json();
-            persistTokens(data);
-            return data.access || "";
-          }
-        }catch(_){/* noop */}
-        clearTokens();
-        return "";
-      })();
-      try{
-        await tokenPromise;
-      }finally{
-        tokenPromise = null;
-      }
-    }else{
-      await tokenPromise;
-    }
-    return storage.getItem("access_token") || "";
-  }
-
-  async function refreshAccessToken(){
-    if(!refreshPromise){
-      refreshPromise = (async () => {
-        const refresh = storage.getItem("refresh_token");
-        if(!refresh){
-          return fetchSessionTokens();
-        }
-        try{
-          const response = await fetch("/api/token/refresh/", {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({refresh}),
-          });
-          if(response.ok){
-            const data = await response.json();
-            persistTokens({access: data.access, refresh});
-            return data.access || "";
-          }
-        }catch(_){/* noop */}
-        clearTokens();
-        return fetchSessionTokens();
-      })();
-      try{
-        await refreshPromise;
-      }finally{
-        refreshPromise = null;
-      }
-    }else{
-      await refreshPromise;
-    }
-    return storage.getItem("access_token") || "";
-  }
-
-  async function ensureAccessToken(){
-    let token = storage.getItem("access_token") || "";
-    if(token){
-      return token;
-    }
-    return fetchSessionTokens();
-  }
-
-  async function apiFetch(url, opts={}){
-    let token = await ensureAccessToken();
-    if(!token){ alert("Sesión inválida"); return null; }
-
-    const headers = {...(opts.headers||{}), Authorization: "Bearer "+token};
-    const options = {...opts, headers};
-    if(options.body && !headers["Content-Type"]){
-      headers["Content-Type"] = "application/json";
-    }
-
-    let response = await fetch(url, options);
-    if(response.status !== 401){
-      return response;
-    }
-
-    token = await refreshAccessToken();
-    if(!token){ alert("Sesión inválida"); return null; }
-    headers.Authorization = "Bearer "+token;
-    response = await fetch(url, options);
-    if(response.status === 401){
-      alert("No autorizado");
-      return null;
-    }
-    return response;
-  }
-
-  const qInput = document.getElementById("q");
+  // ----- DOM -----
   const rows = document.getElementById("rows");
+  const q = document.getElementById("q");
   const btnNew = document.getElementById("btnNew");
   const btnReload = document.getElementById("btnReload");
   const globalMsg = document.getElementById("globalMsg");
@@ -280,143 +161,151 @@ document.addEventListener("DOMContentLoaded", function(){
   const form = document.getElementById("userForm");
   const formAlert = document.getElementById("formAlert");
   const modalTitle = document.getElementById("modalTitle");
-  const modalSaveBtn = document.getElementById("modalSaveBtn");
+  const saveBtn = document.getElementById("saveBtn");
 
-  const fieldUsername = document.getElementById("field_username");
-  const fieldEmail = document.getElementById("field_email");
-  const fieldFirstName = document.getElementById("field_first_name");
-  const fieldLastName = document.getElementById("field_last_name");
-  const fieldPassword = document.getElementById("field_password");
-  const fieldActive = document.getElementById("field_active");
-  const fieldStaff = document.getElementById("field_staff");
-  const roleContainer = document.getElementById("roleCheckboxes");
-  const roleCheckboxes = new Map();
+  const f_username   = document.getElementById("f_username");
+  const f_email      = document.getElementById("f_email");
+  const f_first_name = document.getElementById("f_first_name");
+  const f_last_name  = document.getElementById("f_last_name");
+  const f_password   = document.getElementById("f_password");
+  const f_active     = document.getElementById("f_active");
+  const f_staff      = document.getElementById("f_staff");
+  const roleChecks   = document.getElementById("roleChecks");
 
+  // ----- RBAC context -----
+  const infoEl = document.getElementById("rbacInfo");
+  const allowedRoles = JSON.parse(infoEl?.dataset.allowed || "[]"); // qué roles puedo asignar yo
+  const roleOptions  = JSON.parse(infoEl?.dataset.roleOptions || "[]"); // [{code,label}]
+  const canManageStaff = (infoEl?.dataset.canStaff === "true");
+  const allowedSet = new Set(allowedRoles);
+
+  // ----- Estado -----
+  let allUsers = [];
+  let currentId = null;
+
+  // ----- UI helpers -----
+  function esc(s){return String(s||"").replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));}
   function setGlobalMsg(text, ok){
-    if(!text){
-      globalMsg.classList.add("d-none");
-      globalMsg.textContent = "";
-      return;
-    }
-    globalMsg.className = "alert " + (ok ? "alert-success" : "alert-danger");
+    if(!text){ globalMsg.classList.add("d-none"); return; }
+    globalMsg.className = "alert "+(ok?"alert-success":"alert-danger");
     globalMsg.textContent = text;
+    globalMsg.classList.remove("d-none");
+    setTimeout(()=>globalMsg.classList.add("d-none"), 2500);
   }
-
   function showFormError(text){
     formAlert.textContent = text || "Error desconocido";
     formAlert.classList.remove("d-none");
   }
+  function hideFormError(){ formAlert.classList.add("d-none"); formAlert.textContent = ""; }
 
-  function hideFormError(){
-    formAlert.classList.add("d-none");
-    formAlert.textContent = "";
-  }
-
-  function buildRoleInputs(){
-    roleContainer.innerHTML = "";
-    roleCheckboxes.clear();
-    roleOptions.forEach(option => {
-      const wrapper = document.createElement("div");
-      wrapper.className = "form-check";
+  function buildRoleInputs(selected){
+    roleChecks.innerHTML = "";
+    const selectedSet = new Set(selected||[]);
+    roleOptions.forEach(opt=>{
+      const wrap = document.createElement("div");
+      wrap.className = "form-check";
       const input = document.createElement("input");
       input.type = "checkbox";
       input.className = "form-check-input";
-      input.id = `modal_role_${option.code}`;
-      input.value = option.code;
-      const allowed = allowedSet.has(option.code);
-      input.dataset.locked = allowed ? "0" : "1";
-      if(!allowed){
-        input.disabled = true;
-        wrapper.classList.add("text-muted");
+      input.id = "role_"+opt.code;
+      input.value = opt.code;
+      input.checked = selectedSet.has(opt.code);
+
+      const canAssign = allowedSet.has(opt.code);
+      input.dataset.locked = canAssign ? "0" : "1";
+      if(!canAssign){
+        input.disabled = !input.checked; // si ya lo tenía, permitir verlo marcado pero bloqueado
+        wrap.classList.add("text-muted");
         input.title = "No tienes permiso para asignar este rol.";
       }
-      input.addEventListener("change", enforceRoleExclusion);
+      input.addEventListener("change", enforceExclusion);
+
       const label = document.createElement("label");
       label.className = "form-check-label";
       label.setAttribute("for", input.id);
-      label.textContent = option.label || option.code;
-      wrapper.appendChild(input);
-      wrapper.appendChild(label);
-      roleContainer.appendChild(wrapper);
-      roleCheckboxes.set(option.code, input);
+      label.textContent = opt.label || opt.code;
+
+      wrap.appendChild(input); wrap.appendChild(label);
+      roleChecks.appendChild(wrap);
     });
+    enforceExclusion();
   }
 
-  function enforceRoleExclusion(){
-    const admin = roleCheckboxes.get("admin");
-    const tec = roleCheckboxes.get("tecnico");
-    if(admin && tec){
-      const adminLocked = admin.dataset.locked === "1";
-      const tecLocked = tec.dataset.locked === "1";
+  function enforceExclusion(){
+    const admin = document.getElementById("role_admin");
+    const tec   = document.getElementById("role_tecnico");
+    if(!admin || !tec) return;
 
-      if(admin.checked){
-        tec.checked = false;
-        if(!tecLocked){ tec.disabled = true; }
-      }else if(!tecLocked){
-        tec.disabled = false;
-      }
+    // Si alguno está bloqueado por permiso, que permanezca como está.
+    const aLocked = admin?.dataset.locked === "1";
+    const tLocked = tec?.dataset.locked === "1";
 
-      if(tec.checked){
-        admin.checked = false;
-        if(!adminLocked){ admin.disabled = true; }
-      }else if(!adminLocked){
-        admin.disabled = false;
-      }
-
-      if(adminLocked){ admin.disabled = true; }
-      if(tecLocked){ tec.disabled = true; }
+    if(admin.checked){
+      tec.checked = false;
+      if(!tLocked) tec.disabled = true;  // evitar selección simultánea
+    }else if(!tLocked){
+      tec.disabled = false;
     }
-  }
 
-  function resetRoles(){
-    roleCheckboxes.forEach(input => {
-      input.checked = false;
-      input.disabled = input.dataset.locked === "1";
-    });
-    enforceRoleExclusion();
-  }
-
-  function setRoles(list){
-    const roles = Array.isArray(list) ? list : [];
-    roleCheckboxes.forEach((input, code) => {
-      input.checked = roles.includes(code);
-      input.disabled = input.dataset.locked === "1" && !input.checked;
-    });
-    enforceRoleExclusion();
+    if(tec.checked){
+      admin.checked = false;
+      if(!aLocked) admin.disabled = true;
+    }else if(!aLocked){
+      admin.disabled = false;
+    }
   }
 
   function collectRoles(){
-    const roles = [];
-    roleCheckboxes.forEach((input, code) => {
-      if(input.checked){ roles.push(code); }
-    });
-    return roles;
+    return Array.from(roleChecks.querySelectorAll("input[type=checkbox]:checked")).map(i=>i.value);
   }
 
-  let allItems = [];
-  let currentId = null;
+  function openModal(mode, user){
+    currentId = (mode==="edit" && user) ? user.id : null;
+    hideFormError();
+    form.reset();
+    f_password.value = "";
+    f_password.required = currentId === null;
+    f_active.checked = true;
+    if(f_staff) f_staff.checked = false;
+
+    if(currentId){
+      modalTitle.textContent = "Editar usuario";
+      f_username.value = user.username || "";
+      f_email.value = user.email || "";
+      f_first_name.value = user.first_name || "";
+      f_last_name.value = user.last_name || "";
+      f_active.checked = user.is_active !== false;
+      if(f_staff){ f_staff.checked = !!user.is_staff; }
+      buildRoleInputs(user.roles || []);
+    }else{
+      modalTitle.textContent = "Nuevo usuario";
+      buildRoleInputs([]);
+    }
+    modal.show();
+  }
 
   function render(list){
     if(!list.length){
-      rows.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Sin usuarios</td></tr>';
+      rows.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">Sin usuarios</td></tr>';
       return;
     }
     rows.innerHTML = "";
-    list.forEach(u => {
-      const roles = Array.isArray(u.roles) ? u.roles : [];
-      const fullName = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
-      const roleBadges = roles.length ? roles.map(r=>`<span class="badge text-bg-light me-1 tag">${esc(r)}</span>`).join("") : '<span class="text-muted">—</span>';
+    list.forEach(u=>{
+      const name = [u.first_name,u.last_name].filter(Boolean).join(" ").trim();
+      const roles = (u.roles||[]).map(r=>`<span class="badge text-bg-light me-1 tag">${esc(r)}</span>`).join("") || '<span class="text-muted">—</span>';
       const tr = document.createElement("tr");
+      tr.dataset.id = u.id;
       tr.innerHTML = `
         <td>${u.id}</td>
-        <td><strong>${esc(u.username||"-")}</strong>${u.email?`<div class="text-muted small">${esc(u.email)}</div>`:""}</td>
-        <td>${fullName?esc(fullName):'<span class="text-muted">—</span>'}</td>
+        <td><strong>${esc(u.username||"-")}</strong></td>
+        <td>${name?esc(name):'<span class="text-muted">—</span>'}</td>
+        <td>${u.email?esc(u.email):'<span class="text-muted">—</span>'}</td>
         <td>${u.is_active!==false?'<span class="badge text-bg-success tag">Sí</span>':'<span class="badge text-bg-secondary tag">No</span>'}</td>
         <td>${u.is_staff?'<span class="badge text-bg-primary tag">Sí</span>':'<span class="badge text-bg-secondary tag">No</span>'}</td>
-        <td>${roleBadges}</td>
+        <td class="roles-cell">${roles}</td>
         <td class="text-end">
-          <button class="btn btn-outline-primary btn-sm btn-ripple me-1" data-action="edit" data-id="${u.id}"><i class="bi bi-pencil"></i></button>
-          <button class="btn btn-outline-danger btn-sm btn-ripple" data-action="delete" data-id="${u.id}"><i class="bi bi-trash"></i></button>
+          <button class="btn btn-outline-primary btn-sm btn-ripple me-1" data-action="edit"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-outline-danger btn-sm btn-ripple" data-action="del"><i class="bi bi-trash"></i></button>
         </td>
       `;
       rows.appendChild(tr);
@@ -424,154 +313,134 @@ document.addEventListener("DOMContentLoaded", function(){
   }
 
   function applyFilter(){
-    const term = qInput.value.trim().toLowerCase();
-    if(!term){ render(allItems); return; }
-    const filtered = allItems.filter(u => {
-      const tokens = [
-        u.username || "",
-        u.email || "",
-        `${u.first_name||""} ${u.last_name||""}`,
-        (Array.isArray(u.roles)?u.roles:[]).join(" "),
-      ];
-      return tokens.some(token => token.toLowerCase().includes(term));
+    const term = (q.value||"").toLowerCase();
+    if(!term) return render(allUsers);
+    const filtered = allUsers.filter(u=>{
+      const full = `${u.first_name||""} ${u.last_name||""}`.toLowerCase();
+      const roleStr = (u.roles||[]).join(" ").toLowerCase();
+      return (u.username||"").toLowerCase().includes(term)
+          || (u.email||"").toLowerCase().includes(term)
+          || full.includes(term)
+          || roleStr.includes(term);
     });
     render(filtered);
   }
 
-  qInput.addEventListener("input", applyFilter);
-
+  // ----- API calls -----
   async function loadUsers(){
-    const response = await apiFetch(API_BASE);
-    if(!response) return;
-    const data = await response.json().catch(()=>[]);
-    allItems = Array.isArray(data) ? data : [];
+    rows.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">Cargando…</td></tr>';
+    const r = await apiFetch("/api/users/");
+    if(!r){ return; }
+    if(r.status === 401){ setGlobalMsg("Sesión inválida.", false); return; }
+    const data = await r.json().catch(()=>[]);
+    allUsers = Array.isArray(data) ? data : (data.results || []);
     applyFilter();
   }
 
-  function openModal(mode, user){
-    currentId = mode === "edit" && user ? user.id : null;
-    form.reset();
-    hideFormError();
-    resetRoles();
-    fieldPassword.value = "";
-    fieldPassword.required = currentId === null;
-    fieldActive.checked = true;
-    if(fieldStaff){ fieldStaff.checked = false; }
-
-    if(currentId){
-      modalTitle.textContent = "Editar usuario";
-      modalSaveBtn.textContent = "Guardar cambios";
-      fieldUsername.value = user.username || "";
-      fieldEmail.value = user.email || "";
-      fieldFirstName.value = user.first_name || "";
-      fieldLastName.value = user.last_name || "";
-      fieldActive.checked = user.is_active !== false;
-      if(fieldStaff){ fieldStaff.checked = !!user.is_staff; }
-      setRoles(user.roles);
-    }else{
-      modalTitle.textContent = "Nuevo usuario";
-      modalSaveBtn.textContent = "Crear usuario";
+  async function createUser(payload){
+    const r = await apiFetch("/api/users/", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify(payload)
+    });
+    if(!r) return { ok:false, error:"Sin respuesta" };
+    let j = {};
+    try{ j = await r.json(); }catch(_){}
+    if(!r.ok){
+      return { ok:false, error: j.detail || j.error || JSON.stringify(j) };
     }
-
-    modal.show();
+    return { ok:true, data:j };
   }
 
-  function collectPayload(){
-    const payload = {
-      username: fieldUsername.value.trim(),
-      email: fieldEmail.value.trim(),
-      first_name: fieldFirstName.value.trim(),
-      last_name: fieldLastName.value.trim(),
-      is_active: fieldActive.checked,
-      roles: collectRoles(),
-    };
-    if(fieldStaff){ payload.is_staff = fieldStaff.checked; }
-    const pwd = fieldPassword.value;
-    if(pwd){ payload.password = pwd; }
-    return payload;
+  async function updateUser(id, payload){
+    const r = await apiFetch(`/api/users/${id}/`, {
+      method:"PUT",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify(payload)
+    });
+    if(!r) return { ok:false, error:"Sin respuesta" };
+    let j = {};
+    try{ j = await r.json(); }catch(_){}
+    if(!r.ok){
+      return { ok:false, error: j.detail || j.error || JSON.stringify(j) };
+    }
+    return { ok:true, data:j };
   }
 
-  rows.addEventListener("click", async (ev) => {
-    const btn = ev.target.closest("[data-action]");
+  async function deleteUser(id){
+    const r = await apiFetch(`/api/users/${id}/`, { method:"DELETE" });
+    if(!r) return { ok:false, error:"Sin respuesta" };
+    if(r.status===204) return { ok:true };
+    let j = {};
+    try{ j = await r.json(); }catch(_){}
+    if(!r.ok){
+      return { ok:false, error: j.detail || j.error || JSON.stringify(j) };
+    }
+    return { ok:true };
+  }
+
+  // ----- Eventos -----
+  q.addEventListener("input", applyFilter);
+
+  btnNew.addEventListener("click", ()=> openModal("create"));
+
+  btnReload.addEventListener("click", loadUsers);
+
+  rows.addEventListener("click", async (ev)=>{
+    const btn = ev.target.closest("button[data-action]");
     if(!btn) return;
-    const id = Number(btn.dataset.id);
-    const user = allItems.find(x => x.id === id);
-    if(!user) return;
-    if(btn.dataset.action === "edit"){
+    const id = Number(btn.closest("tr")?.dataset.id);
+    const user = allUsers.find(u=>u.id===id);
+    if(!id || !user) return;
+
+    if(btn.dataset.action==="edit"){
       openModal("edit", user);
-    }else if(btn.dataset.action === "delete"){
+    }else if(btn.dataset.action==="del"){
       if(!confirm(`¿Eliminar al usuario ${user.username}?`)) return;
-      const response = await apiFetch(`${API_BASE}${id}/`, { method:"DELETE" });
-      if(!response) return;
-      if(response.ok){
-        setGlobalMsg("Usuario eliminado.", true);
-        await loadUsers();
-      }else{
-        let data = {};
-        try{ data = await response.json(); }catch(_){ data = {}; }
-        setGlobalMsg(data.detail || data.error || "No se pudo eliminar el usuario.", false);
-      }
+      const res = await deleteUser(id);
+      if(!res.ok){ setGlobalMsg(res.error || "No se pudo eliminar", false); return; }
+      setGlobalMsg("Usuario eliminado.", true);
+      await loadUsers();
     }
   });
 
-  form.addEventListener("submit", async (ev) => {
-    ev.preventDefault();
+  form.addEventListener("submit", async (e)=>{
+    e.preventDefault();
     hideFormError();
-    const payload = collectPayload();
-    if(payload.roles.includes("admin") && payload.roles.includes("tecnico")){
-      showFormError("Admin y Técnico no pueden coexistir.");
+    const roles = collectRoles();
+    if(roles.includes("admin") && roles.includes("tecnico")){
+      showFormError("admin y técnico son excluyentes.");
       return;
     }
+    const payload = {
+      username: f_username.value.trim(),
+      email: f_email.value.trim(),
+      first_name: f_first_name.value.trim(),
+      last_name: f_last_name.value.trim(),
+      is_active: !!f_active.checked,
+      roles
+    };
+    if(canManageStaff){ payload.is_staff = !!f_staff?.checked; }
+    const pwd = f_password.value;
+    if(pwd) payload.password = pwd;
 
-    try{
-      let response;
-      if(currentId){
-        response = await apiFetch(`${API_BASE}${currentId}/`, { method:"PUT", body: JSON.stringify(payload) });
-      }else{
-        response = await apiFetch(API_BASE, { method:"POST", body: JSON.stringify(payload) });
-      }
-      if(!response) return;
+    saveBtn.disabled = true;
 
-      let data = {};
-      if(response.status !== 204){
-        try{ data = await response.json(); }catch(_){ data = {}; }
-      }
+    const res = currentId ? await updateUser(currentId, payload) : await createUser(payload);
 
-      if(!response.ok){
-        const error = data.detail || data.error || (typeof data === "object" ? Object.values(data).join(" ") : "Error al guardar");
-        showFormError(error);
-        return;
-      }
+    saveBtn.disabled = false;
 
-      modal.hide();
-      setGlobalMsg(currentId ? "Usuario actualizado." : "Usuario creado.", true);
-      await loadUsers();
-    }catch(err){
-      showFormError("Error de red. Intenta nuevamente.");
+    if(!res.ok){
+      showFormError(res.error || "No se pudo guardar.");
+      return;
     }
-  });
-
-  btnNew.addEventListener("click", (ev) => {
-    ev.preventDefault();
-    openModal("create");
-  });
-
-  btnReload.addEventListener("click", async (ev) => {
-    ev.preventDefault();
+    modal.hide();
+    setGlobalMsg(currentId ? "Usuario actualizado." : "Usuario creado.", true);
     await loadUsers();
   });
 
-  const canCreate = allowedSet.size > 0 || canManageStaff;
-  if(!canCreate){
-    btnNew.disabled = true;
-    btnNew.title = "No tienes permisos para crear usuarios.";
-  }
-
-  buildRoleInputs();
-  enforceRoleExclusion();
+  // ----- Inicio -----
   loadUsers();
-});
+})();
 </script>
 {% endblock %}
-
-

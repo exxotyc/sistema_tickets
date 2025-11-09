@@ -103,7 +103,6 @@
                     <i class="bi bi-gear me-1"></i>Mantenedor
                   </a>
                   <ul class="dropdown-menu">
-                    {# Opcional: link de Roles visible solo para staff/admin #}
                     {% if request.user.is_staff %}
                       <li><a class="dropdown-item" href="{% url 'maint_roles' %}">Roles</a></li>
                       <li><hr class="dropdown-divider"></li>
@@ -173,20 +172,33 @@
       function getCookie(name){
         const m=document.cookie.match('(^|;)\\s*'+name+'\\s*=\\s*([^;]+)'); return m?m.pop():"";
       }
+
       (async ()=>{
-        try{
-          if(!localStorage.getItem("access_token")){
-            const r=await fetch("{% url 'api:token_session' %}", {
-              method:"POST", headers: {"X-CSRFToken": getCookie("csrftoken")}
+        const currentUser = "{{ request.user.username }}";
+        const storedUser = localStorage.getItem("username");
+
+        // Limpia tokens si cambió de usuario
+        if (storedUser && storedUser !== currentUser) {
+          console.log("🔄 Usuario cambiado:", storedUser, "→", currentUser);
+          localStorage.clear();
+        }
+
+        // Genera nuevos tokens si no existen o si se limpió
+        if(!localStorage.getItem("access_token")){
+          try{
+            const r = await fetch("{% url 'api:token_session' %}", {
+              method:"POST",
+              headers: {"X-CSRFToken": getCookie("csrftoken")}
             });
             if(r.ok){
-              const data=await r.json();
+              const data = await r.json();
               localStorage.setItem("access_token", data.access);
               localStorage.setItem("refresh_token", data.refresh);
-              localStorage.setItem("username", "{{ request.user.username }}");
+              localStorage.setItem("username", currentUser);
+              console.log("✅ Token generado para:", currentUser);
             }
-          }
-        }catch(_){}
+          }catch(err){ console.error("❌ Error generando token:", err); }
+        }
       })();
     </script>
 

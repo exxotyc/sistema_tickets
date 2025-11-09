@@ -1,7 +1,6 @@
 # tickets/permissions.py
 from rest_framework.permissions import BasePermission, SAFE_METHODS
 
-
 def _extract_ticket(obj):
     """Obtiene el ticket asociado desde el objeto recibido."""
     if hasattr(obj, "ticket") and obj.ticket is not None:
@@ -16,7 +15,14 @@ class IsTicketActorOrAdmin(BasePermission):
 
     def has_permission(self, request, view):
         user = request.user
-        return bool(user and user.is_authenticated)
+        # Solo usuarios autenticados pueden acceder
+        if not user or not user.is_authenticated:
+            return False
+
+        # Si está listando, verificar que su rol sea válido
+        if view.action == "list":
+            return True  # permitimos listar, pero el filtrado lo hará get_queryset
+        return True
 
     def has_object_permission(self, request, view, obj):
         user = request.user
@@ -32,6 +38,7 @@ class IsTicketActorOrAdmin(BasePermission):
             or user.groups.filter(name__in=self.admin_like_groups).exists()
         )
 
+        # Métodos de solo lectura (GET, HEAD, OPTIONS)
         if request.method in SAFE_METHODS:
             return (
                 is_admin_like
@@ -39,6 +46,7 @@ class IsTicketActorOrAdmin(BasePermission):
                 or assigned_to_id == user.id
             )
 
+        # Escritura o modificación
         if is_admin_like:
             return True
 

@@ -27,6 +27,12 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework import permissions
 from rest_framework.response import Response
 import io, csv
+from django.contrib.auth import get_user_model
+from rest_framework.permissions import IsAuthenticated
+
+
+UserModel = get_user_model()
+
 
 try:
     import openpyxl
@@ -81,14 +87,27 @@ from .serializers import (
     TicketAttachmentSerializer,
     FAQSerializer,
     UserAdminSerializer,
+    UserSummarySerializer,
 )
 from .reports import build_report_rows, filters_footer
 from .services.assets import build_asset_history
 from .services.metrics import TicketMetricsService
 
-# ==================== Helpers ====================
 
-UserModel = get_user_model()
+
+FILTER_QUERY_PARAMS = [
+    openapi.Parameter("from", openapi.IN_QUERY, description="Fecha inicial (YYYY-MM-DD)", type=openapi.TYPE_STRING),
+    openapi.Parameter("to", openapi.IN_QUERY, description="Fecha final (YYYY-MM-DD)", type=openapi.TYPE_STRING),
+    openapi.Parameter("category", openapi.IN_QUERY, description="ID de categoría", type=openapi.TYPE_INTEGER),
+    openapi.Parameter("assignee", openapi.IN_QUERY, description="ID de técnico asignado", type=openapi.TYPE_INTEGER),
+    openapi.Parameter("priority", openapi.IN_QUERY, description="Prioridad (low, medium, high)", type=openapi.TYPE_STRING),
+]
+
+#==================== Helpers ====================
+
+def index(request):
+    return render(request, "tickets/index.html")
+
 
 def in_group(user, name: str) -> bool:
     return user.is_authenticated and user.groups.filter(name=name).exists()
@@ -155,10 +174,17 @@ class FAQViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         return Response({"status": "recorded", "feedback_id": feedback.pk})
 
 
+
 class TicketViewSet(viewsets.ModelViewSet):
-    queryset = Ticket.objects.select_related("requester", "assigned_to", "category").all().order_by("-created_at")
+    """
+    ViewSet principal para gestionar Tickets.
+    Controla visibilidad y permisos según rol:
+    - admin: ve y edita todos
+    - técnico: solo sus tickets asignados, puede cambiar estado o asignarse
+    - solicitante: solo sus propios tickets
+    """
     serializer_class = TicketSerializer
-    permission_classes = [IsTicketActorOrAdmin]
+    permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter, DjangoFilterBackend]
     search_fields = ["title", "description"]
@@ -166,58 +192,93 @@ class TicketViewSet(viewsets.ModelViewSet):
     filterset_fields = ["state", "priority", "category", "asset_id"]
 
     def get_queryset(self):
-        qs = super().get_queryset()
-        u = self.request.user
-        if not u.is_authenticated:
-            return qs.none()
-        if _is_adminlike(u):
+        user = self.request.user
+        qs = Ticket.objects.select_related("requester", "assigned_to", "category").order_by("-created_at")
+
+        if user.groups.filter(name="admin").exists():
             return qs
-        return qs.filter(Q(requester=u) | Q(assigned_to=u)).distinct()
+        elif user.groups.filter(name="tecnico").exists():
+            return qs.filter(assigned_to=user)
+        else:
+            return qs.filter(requester=user)
 
     def perform_create(self, serializer):
-        serializer.save(requester=self.request.user)
+        user = self.request.user
+        if not user.is_authenticated:
+            raise PermissionDenied("Debes iniciar sesión para crear tickets.")
+        obj = serializer.save(requester=user)
+        return obj
+
+    def perform_update(self, serializer):
+        """Permite que el técnico cambie estado de sus tickets."""
+        instance = self.get_object()
+        user = self.request.user
+
+        is_admin = user.groups.filter(name="admin").exists()
+        is_tech = user.groups.filter(name="tecnico").exists()
+
+        # Técnicos solo pueden modificar sus propios tickets asignados
+        if is_tech and instance.assigned_to != user:
+            raise PermissionDenied("No puedes modificar tickets que no te fueron asignados.")
+
+        # Solicitantes no pueden editar nada
+        if not (is_admin or is_tech):
+            raise PermissionDenied("No tienes permiso para editar este ticket.")
+
+        serializer.save()
 
     @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
     def assign(self, request, pk=None):
-        if not _is_adminlike(request.user):
-            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+        """
+        Permite reasignar tickets.
+        - Admin puede asignar a cualquiera.
+        - Técnico solo puede asignarse a sí mismo.
+        """
+        user = request.user
         ticket = self.get_object()
-        previous = ticket.assigned_to
+        is_admin = user.groups.filter(name="admin").exists()
+        is_tech = user.groups.filter(name="tecnico").exists()
+
+        if not (is_admin or is_tech):
+            return Response({"detail": "No autorizado"}, status=status.HTTP_403_FORBIDDEN)
+
         user_id = request.data.get("user_id")
+        if not user_id:
+            return Response({"error": "user_id requerido"}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
-            user = UserModel.objects.get(pk=user_id)
+            target_user = UserModel.objects.get(pk=user_id)
         except UserModel.DoesNotExist:
-            return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
-        reason = request.data.get("reason") or request.data.get("assignment_reason")
-        if previous != user:
-            ticket.assigned_to = user
-            ticket.save(update_fields=["assigned_to"])
-            meta = {
+            return Response({"error": "Usuario no encontrado"}, status=status.HTTP_404_NOT_FOUND)
+
+      # Si es técnico, solo puede asignarse a sí mismo, o a un ticket sin asignar
+        if is_tech and target_user != user:
+            if ticket.assigned_to and ticket.assigned_to != user:
+                return Response({"error": "No puedes asignar tickets que ya están asignados a otros."},
+                        status=status.HTTP_403_FORBIDDEN)
+
+
+        previous = ticket.assigned_to
+        ticket.assigned_to = target_user
+        ticket.save(update_fields=["assigned_to"])
+
+        TicketLog.objects.create(
+            ticket=ticket,
+            user=request.user,
+            action="reassigned",
+            meta_json={
                 "from": previous.id if previous else None,
-                "to": user.id if user else None,
-                "username": user.username if user else None,
-            }
-            if reason is not None:
-                meta["reason"] = reason
-            TicketLog.objects.create(
-                ticket=ticket,
-                user=request.user,
-                action="reassigned",
-                meta_json=meta,
-            )
-        elif reason is not None:
-            TicketLog.objects.create(
-                ticket=ticket,
-                user=request.user,
-                action="reassigned",
-                meta_json={
-                    "from": previous.id if previous else None,
-                    "to": user.id if user else None,
-                    "username": user.username if user else None,
-                    "reason": reason,
-                },
-            )
-        return Response({"status": "assigned", "assigned_to": user.username})
+                "to": target_user.id,
+                "username": target_user.username,
+            },
+        )
+
+        return Response({
+            "status": "assigned",
+            "assigned_to": target_user.username,
+            "by": user.username
+        })
+
 
 
 ASSET_QUERY_PARAMS = [
@@ -429,16 +490,39 @@ class TicketLogViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
 class UserViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet para gestión y consulta de usuarios.
+    - Admins pueden listar, crear y editar usuarios.
+    - Técnicos pueden ver otros técnicos y administradores.
+    - Los solicitantes solo pueden verse a sí mismos.
+    """
     permission_classes = [permissions.IsAuthenticated]
-    serializer_class = UserAdminSerializer
+    serializer_class = UserAdminSerializer  # Por defecto
+    queryset = UserModel.objects.all().order_by("username").prefetch_related("groups")
+
+    def get_serializer_class(self):
+        # 🔹 Para listados o lectura, usamos el serializer liviano
+        if self.action in ["list", "retrieve"]:
+            return UserSummarySerializer
+        # 🔹 Para crear/editar, el administrativo
+        return UserAdminSerializer
 
     def get_queryset(self):
+        user = self.request.user
         username_field = getattr(UserModel, "USERNAME_FIELD", "username")
         qs = UserModel.objects.all().order_by(username_field).prefetch_related("groups")
-        user = self.request.user
-        if not _is_adminlike(user):
-            return qs.filter(pk=user.pk)
 
+        # Admin → ve todos
+        if user.groups.filter(name="admin").exists() or user.is_staff or user.is_superuser:
+            pass
+        # Técnico → ve técnicos y admins
+        elif user.groups.filter(name="tecnico").exists():
+            qs = qs.filter(groups__name__in=["tecnico", "admin"]).distinct()
+        # Solicitante → solo él mismo
+        else:
+            qs = qs.filter(pk=user.pk)
+
+        # 🔍 Filtro de búsqueda opcional
         search = (self.request.query_params.get("search") or self.request.query_params.get("q") or "").strip()
         if search:
             qs = qs.filter(
@@ -463,13 +547,9 @@ class UserViewSet(viewsets.ModelViewSet):
         roles = list(serializer.validated_data.get("roles") or [])
         disallowed = set(roles) - allowed
         if disallowed:
-            raise PermissionDenied(
-                "No puedes asignar los roles: " + ", ".join(sorted(disallowed))
-            )
+            raise PermissionDenied("No puedes asignar los roles: " + ", ".join(sorted(disallowed)))
 
-        if serializer.validated_data.get("is_staff") and not (
-            actor.is_staff or actor.is_superuser
-        ):
+        if serializer.validated_data.get("is_staff") and not (actor.is_staff or actor.is_superuser):
             raise PermissionDenied("No puedes asignar el estado de staff.")
 
         serializer.save()
@@ -480,9 +560,7 @@ class UserViewSet(viewsets.ModelViewSet):
 
         if "is_staff" in serializer.validated_data:
             desired_staff = bool(serializer.validated_data["is_staff"])
-            if desired_staff != target.is_staff and not (
-                actor.is_staff or actor.is_superuser
-            ):
+            if desired_staff != target.is_staff and not (actor.is_staff or actor.is_superuser):
                 raise PermissionDenied("No puedes modificar el estado de staff.")
 
         roles = serializer.validated_data.get("roles", None)
@@ -505,28 +583,34 @@ class UserViewSet(viewsets.ModelViewSet):
         if not (actor.is_staff or actor.is_superuser):
             current_roles = set(rbac.user_managed_roles(instance))
             if current_roles - allowed:
-                raise PermissionDenied(
-                    "No puedes eliminar usuarios con roles que no administras."
-                )
+                raise PermissionDenied("No puedes eliminar usuarios con roles que no administras.")
 
-        if "admin" in rbac.user_managed_roles(instance) and not rbac.has_other_admins(
-            instance
-        ):
+        if "admin" in rbac.user_managed_roles(instance) and not rbac.has_other_admins(instance):
             raise PermissionDenied("Debe quedar al menos un admin en el sistema.")
 
         super().perform_destroy(instance)
 
+
 @api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated])
+@permission_classes([IsAuthenticated])
 def stats(request):
-    u = request.user
-    qs = Ticket.objects.all() if _is_adminlike(u) else Ticket.objects.filter(Q(requester=u) | Q(assigned_to=u))
-    return Response({
-        "open": qs.filter(state="open").count(),
-        "in_progress": qs.filter(state="in_progress").count(),
-        "resolved": qs.filter(state="resolved").count(),
-        "closed": qs.filter(state="closed").count(),
-    })
+    """
+    Devuelve información general del sistema + roles del usuario autenticado.
+    Utilizada por el frontend para mostrar permisos dinámicamente.
+    """
+    user = request.user
+    groups = list(user.groups.values_list("name", flat=True))
+
+    data = {
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "roles": groups,
+        },
+        "ok": True,
+    }
+    return Response(data)
 
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
@@ -539,19 +623,79 @@ def session_token(request):
 
 @login_required
 def ticket_new(request):
-    return _render(request, "tickets/ticket_new.html")
+    # 🚫 Bloquear acceso a técnicos
+    if request.user.groups.filter(name="tecnico").exists():
+        messages.error(request, "No tienes permiso para crear tickets.")
+        return redirect("ticket_list")
 
-def index(request):
-    return _render(request, "tickets/index.html")
+    if request.method == "POST":
+        title = request.POST.get("title", "").strip()
+        description = request.POST.get("description", "").strip()
+        category_id = request.POST.get("category")
+        priority = request.POST.get("priority", "medium")
+
+        if not title or not description:
+            messages.error(request, "Título y descripción son obligatorios.")
+            categories = Category.objects.order_by("name")
+            return render(
+                request,
+                "tickets/ticket_new.html",
+                {
+                    "categories": categories,
+                    "is_admin_or_tecnico": request.user.groups.filter(
+                        name__in=["admin", "tecnico"]
+                    ).exists(),
+                },
+            )
+
+        # 🔒 Forzar prioridad fija para solicitantes
+        if not _is_adminlike(request.user):
+            priority = "medium"
+
+        Ticket.objects.create(
+            title=title,
+            description=description,
+            category_id=category_id or None,
+            priority=priority,
+            requester=request.user,
+            state="open",
+        )
+
+        messages.success(request, "Ticket creado correctamente.")
+        return redirect("ticket_list")
+
+    categories = Category.objects.order_by("name")
+    return render(
+        request,
+        "tickets/ticket_new.html",
+        {
+            "categories": categories,
+            "is_admin_or_tecnico": request.user.groups.filter(
+                name__in=["admin", "tecnico"]
+            ).exists(),  # 👈 pasa esta variable al template
+        },
+    )
 
 @login_required
 def dashboard(request):
-    total = Ticket.objects.count()
-    abiertos = Ticket.objects.filter(state="open").count()
-    en_progreso = Ticket.objects.filter(state="in_progress").count()
-    resueltos = Ticket.objects.filter(state="resolved").count()
-    mios = Ticket.objects.filter(requester=request.user).count()
+    user = request.user
 
+    # --- Base queryset (visibilidad según rol)
+    if user.groups.filter(name="admin").exists():
+        base_qs = Ticket.objects.all()
+    elif user.groups.filter(name="tecnico").exists():
+        base_qs = Ticket.objects.filter(assigned_to=user)
+    else:
+        base_qs = Ticket.objects.filter(requester=user)
+
+    # --- Totales globales del usuario
+    total = base_qs.count()
+    abiertos = base_qs.filter(state="open").count()
+    en_progreso = base_qs.filter(state="in_progress").count()
+    resueltos = base_qs.filter(state="resolved").count()
+    mios = Ticket.objects.filter(requester=user).count()
+
+    # --- Porcentajes para la barra de estado
     if total:
         pa = round(abiertos * 100 / total)
         pp = round(en_progreso * 100 / total)
@@ -559,19 +703,22 @@ def dashboard(request):
     else:
         pa = pp = pr = 0
 
+    # --- Top categorías (solo tickets visibles para el usuario)
     por_categoria = (
-        Ticket.objects.values("category__name")
+        base_qs.values("category__name")
         .annotate(c=Count("id"))
         .order_by("-c")[:6]
     )
 
+    # --- Últimos 7 días
     ultimos_7d = now() - timedelta(days=7)
     recientes = (
-        Ticket.objects.select_related("requester", "category")
+        base_qs.select_related("requester", "category")
         .filter(created_at__gte=ultimos_7d)
         .order_by("-created_at")[:8]
     )
 
+    # --- Contexto final
     ctx = {
         "total": total,
         "abiertos": abiertos,
@@ -580,14 +727,33 @@ def dashboard(request):
         "mios": mios,
         "por_categoria": por_categoria,
         "recientes": recientes,
-        "pa": pa, "pp": pp, "pr": pr,
+        "pa": pa,
+        "pp": pp,
+        "pr": pr,
     }
-    return _render(request, "tickets/dashboard.html", ctx)
+
+    return render(request, "tickets/dashboard.html", ctx)
+
 
 @login_required
 def ticket_list(request):
-    qs = Ticket.objects.select_related("requester", "assigned_to", "category").order_by("-created_at")
+    user = request.user
+    roles = set(user.groups.values_list("name", flat=True))
 
+    qs = (
+        Ticket.objects.select_related("requester", "assigned_to", "category")
+        .order_by("-created_at")
+    )
+
+    # --- RBAC
+    if "admin" in roles:
+        pass  # Admin ve todos
+    elif "tecnico" in roles:
+        qs = qs.filter(assigned_to=user)
+    else:
+        qs = qs.filter(requester=user)
+
+    # --- Filtros GET
     state = (request.GET.get("state") or "").strip()
     q = (request.GET.get("q") or "").strip()
 
@@ -595,16 +761,50 @@ def ticket_list(request):
         qs = qs.filter(state=state)
 
     if q:
-        m = re.fullmatch(r"#?\s*(\d+)", q)  # "#14" o "14"
+        m = re.fullmatch(r"#?\s*(\d+)", q)
         if m:
             ticket_id = int(m.group(1))
-            qs = qs.filter(Q(id=ticket_id) | Q(title__icontains=q) | Q(description__icontains=q))
+            qs = qs.filter(
+                Q(id=ticket_id)
+                | Q(title__icontains=q)
+                | Q(description__icontains=q)
+            )
         else:
             qs = qs.filter(Q(title__icontains=q) | Q(description__icontains=q))
 
-    return _render(request, "tickets/tickets_list.html", {
-        "tickets": qs, "state": state, "q": q
-    })
+    # --- Fuerza evaluación y genera datos de depuración
+    tickets = list(qs)
+    ids = [t.id for t in tickets]
+    print(
+        "TICKET_LIST → user:",
+        user.username,
+        "| roles:",
+        roles,
+        "| count:",
+        len(tickets),
+        "| ids:",
+        ids,
+    )
+
+    # --- Determinar si es técnico (para el template)
+    is_tecnico = "tecnico" in roles
+
+    # --- Render directo
+    return render(
+        request,
+        "tickets/tickets_list.html",
+        {
+            "tickets": tickets,
+            "tickets_count": len(tickets),
+            "tickets_ids": ids,
+            "state": state,
+            "q": q,
+            "is_tecnico": is_tecnico,  # 👈 agregado
+        },
+    )
+
+
+
 
 @login_required
 def ticket_detail(request, pk: int):
@@ -682,9 +882,15 @@ def maint_section(request, code: str):
 
 # ---------- Roles (UI) ----------
 
-def _is_admin_or_tech(u):
-    return bool(rbac.actor_allowed_roles(u))
+# -------- Helpers de RBAC ----------
+def _is_adminlike(u):
+    # Ajusta si tienes otra forma de comprobar admin
+    return u.is_superuser or u.groups.filter(name="admin").exists()
 
+def _is_admin_or_tech(u):
+    return u.is_superuser or u.groups.filter(name__in=["admin", "tecnico"]).exists()
+
+# ---------- Roles (UI) ----------
 @login_required
 @user_passes_test(_is_admin_or_tech)
 def maint_roles(request):
@@ -705,18 +911,16 @@ def maint_roles(request):
         {
             "id": u.id,
             "username": _display_name(u),
+            "email": u.email,
         }
         for u in users_list
     ]
 
+    # 🔥 Cargar correctamente los roles desde RBAC
     roles_map = {str(u.id): rbac.user_managed_roles(u) for u in users_list}
     allowed_roles = sorted(rbac.actor_allowed_roles(request.user))
     managed_roles = sorted(rbac.MANAGED_ROLE_NAMES)
-
-    role_options = [
-        {"code": r, "label": rbac.ROLE_LABELS.get(r, r.title())}
-        for r in managed_roles
-    ]
+    role_labels = rbac.ROLE_LABELS
 
     ctx = {
         "users": users,
@@ -726,11 +930,9 @@ def maint_roles(request):
         "managed_roles": managed_roles,
         "allowed_roles_json": json.dumps(allowed_roles),
         "managed_roles_json": json.dumps(managed_roles),
-        "role_labels_json": json.dumps(rbac.ROLE_LABELS),
-        "role_labels": rbac.ROLE_LABELS,
+        "role_labels_json": json.dumps(role_labels),
+        "role_labels": role_labels,
         "can_manage_staff": request.user.is_staff or request.user.is_superuser,
-        "role_options": role_options,
-        "role_options_json": json.dumps(role_options),
     }
 
     return render(request, "tickets/maint_roles.html", ctx)
@@ -742,9 +944,11 @@ def maint_roles(request):
 def roles_data(request):
     if not _is_adminlike(request.user):
         return HttpResponseForbidden("No autorizado")
+
     q = (request.GET.get("q") or "").strip().lower()
     username_field = getattr(UserModel, "USERNAME_FIELD", "username")
     users = UserModel.objects.order_by(username_field)
+
     if q:
         users = users.filter(
             Q(username__icontains=q)
@@ -752,38 +956,40 @@ def roles_data(request):
             | Q(first_name__icontains=q)
             | Q(last_name__icontains=q)
         )
+
     data = []
     for u in users:
-        roles = rbac.user_managed_roles(u)
         full_name = (u.get_full_name() or "").strip()
         base_name = getattr(u, username_field) or u.get_username()
         display = f"{full_name} ({u.get_username()})" if full_name else base_name
+
+        roles = list(u.groups.values_list("name", flat=True))
+        if not roles:
+            roles = ["solicitante"]
+
         data.append({
             "id": u.id,
             "username": display,
-            "raw_username": u.get_username(),
             "email": u.email,
-            "full_name": full_name,
-            "is_staff": u.is_staff,
             "roles": roles,
+            "is_staff": u.is_staff,
         })
-    return JsonResponse({"users": data, "csrfToken": get_token(request)})
+
+    return JsonResponse({"users": data})
+
 
 # ---------- Roles (mutación) ----------
-
 @login_required
+@user_passes_test(_is_admin_or_tech)
 @require_POST
-@csrf_exempt  # simplifica fetch JSON; quita si ya envías CSRF desde el front
 def roles_update(request):
     if not _is_adminlike(request.user):
         return HttpResponseForbidden("No autorizado")
-    rbac.ensure_groups_exist()
 
     try:
         payload = json.loads(request.body.decode("utf-8"))
         user_id = int(payload.get("user_id"))
         roles = payload.get("roles", [])
-        is_staff = payload.get("is_staff")
     except Exception:
         return JsonResponse({"ok": False, "error": "JSON inválido"}, status=400)
 
@@ -792,38 +998,52 @@ def roles_update(request):
     except UserModel.DoesNotExist:
         return JsonResponse({"ok": False, "error": "Usuario no existe"}, status=404)
 
-    sanitized_roles = rbac.clean_roles(roles)
-    if "admin" in sanitized_roles and "tecnico" in sanitized_roles:
+    # Normaliza roles válidos
+    MANAGED_ROLE_NAMES = {"admin", "tecnico", "solicitante"}
+    roles = [r for r in roles if r in MANAGED_ROLE_NAMES]
+
+    # Exclusión mutua admin/tecnico
+    if "admin" in roles and "tecnico" in roles:
         return JsonResponse({"ok": False, "error": "admin y técnico son excluyentes"}, status=400)
 
-    try:
-        desired = rbac.assert_actor_can_manage(request.user, target, sanitized_roles)
-    except rbac.LastAdminRemovalError as exc:
-        return JsonResponse({"ok": False, "error": str(exc)}, status=400)
-    except rbac.RolePermissionError as exc:
-        return JsonResponse({"ok": False, "error": str(exc)}, status=403)
+    # 🚫 Validar último admin
+    from django.contrib.auth.models import Group
+    admin_group, _ = Group.objects.get_or_create(name="admin")
+    current_admins = UserModel.objects.filter(groups=admin_group).exclude(pk=target.pk)
+    if not current_admins.exists() and "admin" not in roles:
+        return JsonResponse({
+            "ok": False,
+            "error": "No puedes eliminar el rol admin del único administrador activo."
+        }, status=400)
 
-    if is_staff is not None:
-        if not (request.user.is_staff or request.user.is_superuser):
-            return JsonResponse({"ok": False, "error": "No puedes modificar el estado de staff."}, status=403)
-        target.is_staff = bool(is_staff)
-        target.save(update_fields=["is_staff"])
+    # Asegura todos los grupos base
+    for name in MANAGED_ROLE_NAMES:
+        Group.objects.get_or_create(name=name)
 
-    applied = rbac.apply_roles(target, desired)
+    # Limpia roles previos y asigna nuevos
+    target.groups.remove(*Group.objects.filter(name__in=MANAGED_ROLE_NAMES))
+    if roles:
+        target.groups.add(*Group.objects.filter(name__in=roles))
+    else:
+        solicitante = Group.objects.get(name="solicitante")
+        target.groups.add(solicitante)
+        roles = ["solicitante"]
 
-    TicketLog.objects.create(
-        ticket=None,
-        user=request.user if request.user.is_authenticated else None,
-        action="permissions.updated",
-        meta_json={
-            "target_user": target.get_username(),
-            "roles": applied,
+    # Guarda y devuelve datos actualizados
+    target.save()
+
+    return JsonResponse({
+        "ok": True,
+        "user": {
+            "id": target.id,
+            "username": target.get_username(),
+            "email": target.email,
+            "roles": roles,
             "is_staff": target.is_staff,
         },
-        is_critical=True,
-    )
+        "roles": roles,
+    })
 
-    return JsonResponse({"ok": True, "roles": applied})
 
 @login_required
 @user_passes_test(_is_admin_or_tech)
@@ -964,27 +1184,6 @@ FILTER_QUERY_PARAMS = [
         required=False,
     ),
 ]
-
-
-@swagger_auto_schema(method="get", manual_parameters=FILTER_QUERY_PARAMS)
-@api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated])
-def metrics_summary(request):
-    qs = _visible_qs(request.user)
-    qs = apply_ticket_filters(qs, request)
-    service = TicketMetricsService(
-        qs.only("id", "created_at", "requester_id", "priority", "state")
-    )
-    summary = service.summarize()
-    payload = {
-        "total": summary["total"],
-        "by_state": summary["by_state"],
-        "critical": summary["critical"],
-        "mttr_minutes": summary["mttr_minutes"],
-        "frt_minutes": summary["frt_minutes"],
-    }
-    payload.update(summary["by_state"])
-    return Response(payload)
 
 # --- ENDPOINT: /api/reports/export ---
 EXPORT_FORMAT_PARAM = openapi.Parameter(
@@ -1345,3 +1544,56 @@ def asset_history_page(request, asset_id: str):
         "query_params": request.GET,
     }
     return _render(request, "tickets/asset_history.html", ctx)
+
+# ---------------------------------------------------
+# MÉTRICAS API
+# ---------------------------------------------------
+@api_view(["GET"])  # 👈 Este DEBE ir primero
+@permission_classes([permissions.IsAuthenticated])
+@swagger_auto_schema(manual_parameters=FILTER_QUERY_PARAMS)
+def metrics_summary(request):
+    """
+    Endpoint de métricas con filtros:
+    - from / to : rango de fechas (created_at)
+    - category  : id de categoría
+    - assignee  : id de técnico
+    - priority  : prioridad (low/medium/high)
+    """
+    user = request.user
+    qs = Ticket.objects.all()
+
+    # RBAC
+    if user.groups.filter(name="admin").exists():
+        pass
+    elif user.groups.filter(name="tecnico").exists():
+        qs = qs.filter(assigned_to=user)
+    else:
+        qs = qs.filter(requester=user)
+
+    # Filtros
+    from_date = request.GET.get("from")
+    to_date = request.GET.get("to")
+    category = request.GET.get("category")
+    assignee = request.GET.get("assignee")
+    priority = request.GET.get("priority")
+
+    try:
+        if from_date:
+            from_date = make_aware(datetime.strptime(from_date, "%Y-%m-%d"))
+            qs = qs.filter(created_at__gte=from_date)
+        if to_date:
+            to_date = make_aware(datetime.strptime(to_date, "%Y-%m-%d")) + timedelta(days=1)
+            qs = qs.filter(created_at__lt=to_date)
+    except Exception:
+        pass
+
+    if category:
+        qs = qs.filter(category_id=category)
+    if assignee:
+        qs = qs.filter(assigned_to_id=assignee)
+    if priority:
+        qs = qs.filter(priority=priority)
+
+    service = TicketMetricsService(qs)
+    summary = service.summarize()
+    return Response(summary)

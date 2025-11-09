@@ -1,4 +1,3 @@
-{# templates/tickets/dashboard.html #}
 {% extends "tickets/base.html" %}
 {% load static %}
 
@@ -33,7 +32,9 @@
       <h1 class="h4 m-0">Dashboard</h1>
     </div>
     <div class="btn-group">
-      <a href="{% url 'ticket_list' %}" class="btn btn-primary btn-ripple"><i class="bi bi-list-ul me-1"></i>Listado</a>
+      <a href="{% url 'ticket_list' %}" class="btn btn-primary btn-ripple">
+        <i class="bi bi-list-ul me-1"></i>Listado
+      </a>
     </div>
   </div>
 
@@ -119,79 +120,58 @@
     </div>
   </div>
 
-  <!-- Grid: Top categorías / Últimos tickets -->
-  <div class="row g-3 mt-1">
-    <div class="col-md-4">
-      <div class="card-soft p-0 hover-up h-100">
-        <div class="p-3 border-bottom small text-muted d-flex align-items-center gap-2">
-          <i class="bi bi-tags"></i> Top categorías
-        </div>
-        <div class="p-0">
-          {% if por_categoria %}
-            <ul class="list-group list-group-flush">
-              {% for it in por_categoria %}
-              <li class="list-group-item d-flex justify-content-between align-items-center">
-                <span>{{ it.category__name|default:"Sin categoría" }}</span>
-                <span class="badge rounded-pill text-bg-secondary">{{ it.c }}</span>
-              </li>
-              {% endfor %}
-            </ul>
-          {% else %}
-            <div class="p-3 text-muted">Sin datos.</div>
-          {% endif %}
-        </div>
-      </div>
+  <!-- Últimos tickets -->
+  <div class="glass p-3 mt-3 hover-up">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <span class="small text-muted d-flex align-items-center gap-2">
+        <i class="bi bi-clock-history"></i> Últimos tickets (7 días)
+      </span>
+      <a href="{% url 'ticket_list' %}" class="btn btn-sm btn-outline-secondary btn-ripple">Ver todos</a>
     </div>
 
-    <div class="col-md-8">
-      <div class="card-soft p-0 hover-up h-100">
-        <div class="p-3 border-bottom d-flex justify-content-between align-items-center">
-          <span class="small text-muted d-flex align-items-center gap-2"><i class="bi bi-clock-history"></i> Últimos tickets (7 días)</span>
-          <a href="{% url 'ticket_list' %}" class="btn btn-sm btn-outline-secondary btn-ripple">Ver todos</a>
-        </div>
-        <div class="p-0">
-          <div class="table-responsive">
-            <table class="table table-hover mb-0">
-              <thead class="table-light">
-                <tr>
-                  <th>#</th>
-                  <th>Título</th>
-                  <th>Prioridad</th>
-                  <th>Estado</th>
-                  <th>Categoría</th>
-                  <th>Creado</th>
-                </tr>
-              </thead>
-              <tbody>
-              {% for t in recientes %}
-                <tr onclick="window.location.href='/tickets/{{ t.id }}/'" style="cursor:pointer">
-                  <td>{{ t.id }}</td>
-                  <td class="text-truncate" style="max-width:260px">{{ t.title }}</td>
-                  <td><span class="badge text-bg-light">{{ t.get_priority_display }}</span></td>
-                  <td>
-                    {% if t.state == "open" %}
-                      <span class="badge text-bg-danger">Abierto</span>
-                    {% elif t.state == "in_progress" %}
-                      <span class="badge text-bg-warning">En progreso</span>
-                    {% elif t.state == "resolved" %}
-                      <span class="badge text-bg-success">Resuelto</span>
-                    {% elif t.state == "closed" %}
-                      <span class="badge text-bg-secondary">Cerrado</span>
-                    {% else %}
-                      <span class="badge text-bg-light">{{ t.get_state_display }}</span>
-                    {% endif %}
-                  </td>
-                  <td>{{ t.category.name|default:"—" }}</td>
-                  <td class="text-nowrap">{{ t.created_at|date:"Y-m-d H:i" }}</td>
-                </tr>
-              {% empty %}
-                <tr><td colspan="6" class="text-center text-muted py-3">No hay tickets recientes.</td></tr>
-              {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>#</th>
+            <th>Título</th>
+            <th>Prioridad</th>
+            <th>Estado</th>
+            <th>SLA</th>
+            <th>Creado</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in recientes %}
+          <tr onclick="window.location.href='/tickets/{{ t.id }}/'" style="cursor:pointer">
+            <td>{{ t.id }}</td>
+            <td class="text-truncate" style="max-width:240px">{{ t.title }}</td>
+            <td><span class="badge text-bg-light">{{ t.get_priority_display }}</span></td>
+            <td>
+              {% if t.state == "open" %}
+                <span class="badge text-bg-danger">Abierto</span>
+              {% elif t.state == "in_progress" %}
+                <span class="badge text-bg-warning">En progreso</span>
+              {% elif t.state == "resolved" %}
+                <span class="badge text-bg-success">Resuelto</span>
+              {% elif t.state == "closed" %}
+                <span class="badge text-bg-secondary">Cerrado</span>
+              {% else %}
+                <span class="badge text-bg-light">{{ t.get_state_display }}</span>
+              {% endif %}
+            </td>
+            <td>
+              {% with label=t.get_sla_label %}
+                <span class="badge text-bg-{{ label.1 }}">{{ label.2 }} {{ label.0 }}</span>
+              {% endwith %}
+            </td>
+            <td class="text-nowrap">{{ t.created_at|date:"Y-m-d H:i" }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="6" class="text-center text-muted py-3">No hay tickets recientes.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
   </div>
 

@@ -191,13 +191,6 @@
     }
   }
 
-  document.addEventListener("click",(e)=>{
-    const a=e.target.closest('a[data-hard-nav="1"]');
-    if(!a) return;
-    e.preventDefault();
-    window.location.assign(a.getAttribute("href"));
-  });
-
   const ROOT = document.getElementById("ticket-root");
   const TICKET_ID = Number(ROOT?.dataset.ticketId || "0");
   const SERVER_ADMIN = ROOT?.dataset.admin === "1";
@@ -216,7 +209,6 @@
     try{ return { ok:true, data: await r.json() }; }catch{ return { ok:true, data:null }; }
   }
 
-  // --- Carga ticket ---
   async function loadTicket(){
     const data = await getJSON(`/api/tickets/${TICKET_ID}/`);
     if(!data){ alert("No se pudo cargar el ticket."); location.href="{% url 'ticket_list' %}"; return; }
@@ -240,166 +232,166 @@
     if(prSel) prSel.value = data.priority || "medium";
   }
 
-  // --- Comentarios (filtrados por ticket) ---
   async function loadComments(){
     const r = await apiFetch(`/api/comments/?ticket=${TICKET_ID}&ordering=created_at`);
     if(!r) return;
     const data = await r.json();
     const items = data.results || (Array.isArray(data) ? data : []);
     const ul = document.getElementById("comments");
-    ul.innerHTML = "";
-
-    if(!items.length){
-      ul.innerHTML = '<li class="list-group-item text-muted">Sin comentarios</li>';
-      return;
-    }
-
+    ul.innerHTML = items.length ? "" : '<li class="list-group-item text-muted">Sin comentarios</li>';
     for(const c of items){
-      const who =
-        c.user_username ||
-        (c.user && typeof c.user === "object" && c.user.username) ||
-        (typeof c.user === "number" ? `usuario #${c.user}` : null) ||
-        c.username || "usuario";
-
-      const when = c.created_at || c.created || c.timestamp;
-      const text = c.content ?? c.text ?? "";
-
+      const who = c.user_username || c.username || "usuario";
       const li = document.createElement("li");
       li.className = "list-group-item";
-      li.innerHTML = `
-        <div class="d-flex justify-content-between">
-          <strong>${esc(who)}</strong>
-          <small class="text-muted">${fmt(when)}</small>
-        </div>
-        <div>${esc(text)}</div>`;
+      li.innerHTML = `<div class="d-flex justify-content-between">
+        <strong>${esc(who)}</strong><small class="text-muted">${fmt(c.created_at)}</small></div>
+        <div>${esc(c.content||"")}</div>`;
       ul.appendChild(li);
     }
   }
 
-  // --- Adjuntos (filtrados por ticket) ---
   async function loadAttachments(){
     const r = await apiFetch(`/api/attachments/?ticket=${TICKET_ID}&ordering=-created_at`);
     if(!r) return;
     const data = await r.json();
-    const items = (data.results || data);
     const ul = document.getElementById("attachments"); ul.innerHTML="";
-    if(!items.length){ ul.innerHTML = '<li class="list-group-item text-muted">Sin adjuntos</li>'; return; }
+    const items = data.results || data;
+    if(!items.length){ ul.innerHTML='<li class="list-group-item text-muted">Sin adjuntos</li>'; return; }
     for(const a of items){
-      const li=document.createElement("li");
-      li.className="list-group-item";
-      const url = a.file || a.url || a.path || "#";
-      li.innerHTML = `
-        <div class="attachment">
-          <i class="bi bi-paperclip"></i>
-          <a href="${esc(url)}" target="_blank" rel="noopener">${esc(a.filename || a.name || url.split("/").pop())}</a>
-          <small class="text-muted ms-auto">${fmt(a.created_at)}</small>
-        </div>`;
-      ul.appendChild(li);
+      const url=a.file||a.url||a.path||"#";
+      ul.innerHTML += `<li class="list-group-item"><div class="attachment">
+        <i class="bi bi-paperclip"></i>
+        <a href="${esc(url)}" target="_blank">${esc(a.filename||url.split("/").pop())}</a>
+        <small class="text-muted ms-auto">${fmt(a.created_at)}</small></div></li>`;
     }
   }
 
-  // --- Admin helpers ---
-  function jwtRoles(){
-    try{ return JSON.parse(localStorage.getItem("roles")||"[]"); }catch{ return []; }
-  }
-  function isAdmin(){
-    const roles = jwtRoles();
-    return SERVER_ADMIN || roles.includes("admin") || roles.includes("tecnico");
+  async function detectRoles(){
+    try {
+      const r = await apiFetch("/api/stats/");
+      if(!r.ok) return [];
+      const data = await r.json();
+      const roles = data.user?.roles || [];
+      localStorage.setItem("roles", JSON.stringify(roles));
+      return roles;
+    } catch { return []; }
   }
 
-  async function loadUsers(){
-    const sel = document.getElementById("techSelect");
-    const r = await apiFetch("/api/users/");
-    if(!r){ sel.innerHTML='<option value="" disabled>—</option>'; return; }
-    const users = await r.json();
+  // --- Cargar lista de técnicos y administradores ---
+async function loadUsers() {
+  const sel = document.getElementById("techSelect");
+  sel.innerHTML = '<option value="" selected disabled>Cargando técnicos...</option>';
+
+  const access = localStorage.getItem("access_token");
+  if (!access) {
+    sel.innerHTML = '<option value="" disabled>No autenticado</option>';
+    return;
+  }
+
+  try {
+    const r = await fetch("/api/users/", {
+      headers: { Authorization: "Bearer " + access }
+    });
+
+    if (!r.ok) {
+      sel.innerHTML = `<option value="" disabled>Error ${r.status}</option>`;
+      return;
+    }
+
+    const data = await r.json();
+    // 🔹 Filtramos solo técnicos o administradores
+    const filtered = (Array.isArray(data) ? data : []).filter(
+      u => Array.isArray(u.roles) && (u.roles.includes("tecnico") || u.roles.includes("admin"))
+    );
+
     sel.innerHTML = '<option value="" selected disabled>Selecciona técnico</option>';
-    for(const u of users){
-      const opt=document.createElement("option");
-      opt.value = u.id; opt.textContent = u.username;
+    for (const u of filtered) {
+      const opt = document.createElement("option");
+      opt.value = u.id;
+      opt.textContent = `${u.username} (${u.roles.join(", ")})`;
       sel.appendChild(opt);
     }
-  }
 
-  // Asignar técnico
+    if (filtered.length === 0) {
+      sel.innerHTML = '<option value="" disabled>Sin técnicos disponibles</option>';
+    }
+
+  } catch (err) {
+    console.error("💥 Error al cargar usuarios:", err);
+    sel.innerHTML = '<option value="" disabled>Error al cargar técnicos</option>';
+  }
+}
+
+
   document.getElementById("btnAssign").addEventListener("click", async ()=>{
-    const user_id = document.getElementById("techSelect").value;
     const msg = document.getElementById("assignMsg");
     msg.className="form-text";
-    if(!user_id){ msg.textContent="Selecciona un técnico."; return; }
-
-    document.getElementById("btnAssign").disabled = true;
+    let user_id = document.getElementById("techSelect").value;
+    if(!user_id || user_id===""){
+      const roles = JSON.parse(localStorage.getItem("roles")||"[]");
+      if(roles.includes("tecnico")){
+        const r=await apiFetch("/api/stats/"); const j=await r.json();
+        user_id=j.user?.id;
+      }
+    }
+    if(!user_id){ msg.textContent="No se pudo determinar el usuario técnico."; msg.className="text-danger"; return; }
     const r = await apiFetch(`/api/tickets/${TICKET_ID}/assign/`, {
-      method:"POST",
-      headers:{ "Content-Type":"application/json" },
+      method:"POST", headers:{ "Content-Type":"application/json" },
       body: JSON.stringify({ user_id: Number(user_id) })
     });
-    document.getElementById("btnAssign").disabled = false;
-
-    if(!r || !r.ok){
-      let txt = "No se pudo asignar.";
-      try{ const j=await r.json(); txt = j.detail || j.error || txt; }catch{}
-      msg.textContent = txt; msg.className="form-text text-danger"; return;
-    }
-    msg.textContent="Asignado correctamente."; msg.className="form-text text-success";
-    await loadTicket();
+    if(!r || !r.ok){ msg.textContent="Error al asignar."; msg.className="text-danger"; return; }
+    msg.textContent="Asignado correctamente."; msg.className="text-success"; await loadTicket();
   });
 
-  // Guardar estado/prioridad
   async function saveMeta(state, priority){
     const ids=["btnSaveMeta","btnStart","btnResolve","btnClose","btnReopen"];
-    ids.forEach(id=>{ const b=document.getElementById(id); if(b) b && (b.disabled=true); });
-    const res = await sendJSON(`/api/tickets/${TICKET_ID}/`, "PATCH", { state, priority });
-    ids.forEach(id=>{ const b=document.getElementById(id); if(b) b && (b.disabled=false); });
+    ids.forEach(id=>{ const b=document.getElementById(id); if(b) b&&(b.disabled=true); });
+    const res = await sendJSON(`/api/tickets/${TICKET_ID}/`,"PATCH",{ state, priority });
+    ids.forEach(id=>{ const b=document.getElementById(id); if(b) b&&(b.disabled=false); });
     if(!res.ok){ alert("Actualizar: "+res.error); return false; }
     await loadTicket(); return true;
   }
-  document.getElementById("btnSaveMeta").addEventListener("click", async ()=>{
-    const s = document.getElementById("stateSelect").value;
-    const p = document.getElementById("prioSelect").value;
-    await saveMeta(s,p);
-  });
-  document.getElementById("btnStart").addEventListener("click", async ()=>{ await saveMeta("in_progress", document.getElementById("prioSelect").value); });
-  document.getElementById("btnResolve").addEventListener("click", async ()=>{ await saveMeta("resolved", document.getElementById("prioSelect").value); });
-  document.getElementById("btnClose").addEventListener("click", async ()=>{ await saveMeta("closed", document.getElementById("prioSelect").value); });
-  document.getElementById("btnReopen").addEventListener("click", async ()=>{ await saveMeta("open", document.getElementById("prioSelect").value); });
 
-  // --- Envío comentario / adjunto ---
-  document.getElementById("frmComment").addEventListener("submit", async (e)=>{
+  document.getElementById("btnSaveMeta").onclick=()=>saveMeta(stateSelect.value,prioSelect.value);
+  document.getElementById("btnStart").onclick=()=>saveMeta("in_progress",prioSelect.value);
+  document.getElementById("btnResolve").onclick=()=>saveMeta("resolved",prioSelect.value);
+  document.getElementById("btnClose").onclick=()=>saveMeta("closed",prioSelect.value);
+  document.getElementById("btnReopen").onclick=()=>saveMeta("open",prioSelect.value);
+
+  document.getElementById("frmComment").addEventListener("submit", async e=>{
     e.preventDefault();
-    const txt = document.getElementById("commentText");
-    const content = txt.value.trim();
-    if(!content) return;
-    const res = await sendJSON("/api/comments/", "POST", { ticket: TICKET_ID, content });
+    const txt=document.getElementById("commentText");
+    const content=txt.value.trim(); if(!content) return;
+    const res=await sendJSON("/api/comments/","POST",{ ticket:TICKET_ID, content });
     if(!res.ok){ alert("Comentario: "+res.error); return; }
     txt.value=""; loadComments();
   });
 
-  document.getElementById("frmAttach").addEventListener("submit", async (e)=>{
+  document.getElementById("frmAttach").addEventListener("submit", async e=>{
     e.preventDefault();
-    const f = document.getElementById("file").files[0];
+    const f=document.getElementById("file").files[0];
     if(!f) return;
-    const fd = new FormData();
-    fd.append("ticket", TICKET_ID);
-    fd.append("file", f);
-    const r = await apiFetch("/api/attachments/", { method:"POST", body: fd });
-    if(!r || !r.ok){
-      let msg="No se pudo subir el archivo.";
-      try{ const j=await r.json(); msg = j.detail || j.error || msg; }catch{}
-      alert(msg); return;
-    }
-    document.getElementById("file").value="";
-    loadAttachments();
+    const fd=new FormData(); fd.append("ticket",TICKET_ID); fd.append("file",f);
+    const r=await apiFetch("/api/attachments/",{method:"POST",body:fd});
+    if(!r||!r.ok){ alert("No se pudo subir el archivo."); return; }
+    document.getElementById("file").value=""; loadAttachments();
   });
 
   (async function init(){
     if(!TICKET_ID || Number.isNaN(TICKET_ID)){ location.href="{% url 'ticket_list' %}"; return; }
-    await loadTicket();
-    await loadComments();
-    await loadAttachments();
-
-    if(isAdmin()){
+    await loadTicket(); await loadComments(); await loadAttachments();
+    const roles = await detectRoles();
+    const isTech = roles.includes("tecnico");
+    const isAdminUser = roles.includes("admin") || SERVER_ADMIN;
+    if(isAdminUser || isTech){
       document.getElementById("adminPanel").classList.remove("d-none");
-      await loadUsers();
+      if(isTech){
+        const techSelect=document.getElementById("techSelect");
+        techSelect.innerHTML='<option value="" selected>Asignarme a mí mismo</option>';
+        techSelect.disabled=true;
+      }else{
+        await loadUsers();
+      }
     }
   })();
 </script>

@@ -314,55 +314,44 @@ class TicketSerializer(serializers.ModelSerializer):
         """Crea un nuevo ticket (requester se establece en perform_create de la vista)"""
         return Ticket.objects.create(**validated_data)
 
-    def update(self, instance, validated_data):
-        """Actualiza el ticket"""
-        request = self.context.get("request")
-        user = getattr(request, "user", None) if request else None
+def update(self, instance, validated_data):
+    request = self.context.get("request")
+    user = getattr(request, "user", None) if request else None
 
-        new_state = validated_data.pop("state", None)
-        if new_state is not None:
-            force = self._is_admin_like_user(user)
-            try:
-                instance.change_state(new_state, by=user, force=force)
-            except Ticket.InvalidStateTransition as exc:
-                allowed = instance.STATE_TRANSITIONS.get(exc.current_state, set())
-                allowed_display = ", ".join(sorted(allowed)) or "ninguna"
-                raise serializers.ValidationError({
-                    "state": (
-                        f"Transición inválida {exc.current_state} → {exc.new_state}. "
-                        f"Transiciones permitidas: {allowed_display}"
-                    )
-                })
+    # Detectar reasignación
+    new_assignee = validated_data.get("assigned_to", serializers.empty)
+    assignment_reason = validated_data.get("assignment_reason")
 
-        assignment_reason = validated_data.pop("assignment_reason", None)
-        new_assignee = validated_data.pop("assigned_to", serializers.empty)
-        previous_assignee = instance.assigned_to
-        assignment_changed = False
+    # ✅ Validar que solo técnicos o administradores puedan reasignar
+    if new_assignee is not serializers.empty and new_assignee != instance.assigned_to:
+        if not user or not user.groups.filter(name__in=["admin", "tecnico"]).exists():
+            raise serializers.ValidationError({
+                "assigned_to": "Solo técnicos o administradores pueden reasignar tickets."
+            })
 
-        if new_assignee is not serializers.empty:
-            instance.assigned_to = new_assignee
-            assignment_changed = new_assignee != previous_assignee
-
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-        instance.save()
-
-        if assignment_changed:
-            meta = {
-                "from": previous_assignee.id if previous_assignee else None,
-                "to": instance.assigned_to.id if instance.assigned_to else None,
-                "username": instance.assigned_to.username if instance.assigned_to else None,
+        # Registrar log de reasignación
+        TicketLog.objects.create(
+            ticket=instance,
+            action="reassigned",
+            meta_json={
+                "from": instance.assigned_to.id if instance.assigned_to else None,
+                "to": new_assignee.id if new_assignee else None,
+                "by": user.id if user else None,
+                "reason": assignment_reason or "No especificado"
             }
-            if assignment_reason is not None:
-                meta["reason"] = assignment_reason
-            TicketLog.objects.create(
-                ticket=instance,
-                user=user if user and user.is_authenticated else None,
-                action="reassigned",
-                meta_json=meta,
-            )
+        )
 
-        return instance
+    # ✅ Evitar que el solicitante modifique otros campos restringidos
+    if user and user.groups.filter(name="solicitante").exists():
+        # El solicitante solo puede cambiar estado a "open" o agregar comentarios
+        restricted_fields = {"priority", "category", "assigned_to", "sla_minutes"}
+        for field in restricted_fields:
+            if field in validated_data:
+                validated_data.pop(field, None)
+
+    # Aplicar actualización normal
+    return super().update(instance, validated_data)
+
 
 
 # ---------- Logs ----------

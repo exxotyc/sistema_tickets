@@ -3,9 +3,36 @@
 
 {% block extra_head %}
 <style>
-  .kpi{display:grid;gap:.5rem}
-  .kpi .num{font-size:1.6rem;font-weight:700}
+  /* ---- Tarjetas KPI ---- */
+  .kpi {
+    display: grid;
+    gap: .4rem;
+    text-align: center;
+    border-radius: 1rem;
+    background: rgba(255,255,255,.92);
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(15,23,42,.06);
+    padding: 1rem;
+    box-shadow: 0 6px 20px rgba(2,6,23,.08);
+    transition: all .25s ease;
+  }
+  .kpi:hover { transform: translateY(-4px); box-shadow: 0 10px 30px rgba(2,6,23,.12); }
+  .kpi .num { font-size: 1.8rem; font-weight: 700; transition: .3s ease; }
+  .kpi .desc { font-size: .9rem; color: #6b7280; }
+  .sla-bar { height: 10px; border-radius: 999px; overflow: hidden; background: #e5e7eb; transition: width .8s ease; }
+  .sla-bar div { height: 100%; float: left; transition: width .8s ease; }
+  .sla-in { background: #22c55e; }
+  .sla-near { background: #f59e0b; }
+  .sla-breach { background: #ef4444; }
+
+  #slaChart {
+  max-width: 250px;
+  max-height: 250px;
+  margin: 0 auto;
+  }
+
 </style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 {% endblock %}
 
 {% block content %}
@@ -48,18 +75,42 @@
         </select>
       </div>
       <div class="col-12">
-        <button class="btn btn-primary btn-sm btn-ripple" type="submit">Aplicar</button>
+        <button class="btn btn-primary btn-sm btn-ripple" type="submit">
+          <i class="bi bi-funnel"></i> Aplicar filtros
+        </button>
       </div>
     </form>
 
+    <!-- KPIs -->
     <div class="row g-3" id="kpis">
-      <div class="col-6 col-md-3"><div class="kpi card p-3"><div>Abiertos</div><div class="num" id="k_open">0</div></div></div>
-      <div class="col-6 col-md-3"><div class="kpi card p-3"><div>En progreso</div><div class="num" id="k_inp">0</div></div></div>
-      <div class="col-6 col-md-3"><div class="kpi card p-3"><div>Resueltos</div><div class="num" id="k_res">0</div></div></div>
-      <div class="col-6 col-md-3"><div class="kpi card p-3"><div>Cerrados</div><div class="num" id="k_clo">0</div></div></div>
-      <div class="col-6 col-md-3"><div class="kpi card p-3"><div>Críticos</div><div class="num" id="k_crit">0</div></div></div>
-      <div class="col-6 col-md-3"><div class="kpi card p-3"><div>MTTR (h)</div><div class="num" id="k_mttr">0</div></div></div>
-      <div class="col-6 col-md-3"><div class="kpi card p-3"><div>FRT (h)</div><div class="num" id="k_frt">0</div></div></div>
+      <div class="col-6 col-md-3"><div class="kpi"><div>Abiertos</div><div class="num" id="k_open">0</div></div></div>
+      <div class="col-6 col-md-3"><div class="kpi"><div>En progreso</div><div class="num" id="k_inp">0</div></div></div>
+      <div class="col-6 col-md-3"><div class="kpi"><div>Resueltos</div><div class="num" id="k_res">0</div></div></div>
+      <div class="col-6 col-md-3"><div class="kpi"><div>Cerrados</div><div class="num" id="k_clo">0</div></div></div>
+      <div class="col-6 col-md-3"><div class="kpi"><div>Críticos</div><div class="num" id="k_crit">0</div></div></div>
+      <div class="col-6 col-md-3"><div class="kpi"><div>MTTR (h)</div><div class="num" id="k_mttr">0</div></div></div>
+      <div class="col-6 col-md-3"><div class="kpi"><div>FRT (h)</div><div class="num" id="k_frt">0</div></div></div>
+
+      <!-- 🔥 Indicadores SLA -->
+      <div class="col-12 col-md-6">
+        <div class="kpi">
+          <div class="desc">Cumplimiento SLA (%)</div>
+          <div class="num" id="k_sla_compliance">0%</div>
+          <div class="sla-bar mt-2">
+            <div class="sla-in" id="bar_in" style="width:0%"></div>
+            <div class="sla-near" id="bar_near" style="width:0%"></div>
+            <div class="sla-breach" id="bar_breach" style="width:0%"></div>
+          </div>
+          <div class="mt-3">
+            <canvas id="slaChart" height="80"></canvas>
+          </div>
+          <div class="mt-2 small text-muted">
+            🟢 En tiempo: <span id="k_sla_in">0</span> · 
+            🟡 En riesgo: <span id="k_sla_risk">0</span> · 
+            🔴 Vencidos: <span id="k_sla_breach">0</span>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -68,6 +119,28 @@
 {% block extra_js %}
 <script type="module">
   const form = document.getElementById("filtros");
+  const ctx = document.getElementById("slaChart").getContext("2d");
+
+  // 🎨 Config base del donut
+  let slaChart = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels: ["En tiempo", "En riesgo", "Vencidos"],
+      datasets: [{
+        data: [0,0,0],
+        backgroundColor: ["#22c55e","#f59e0b","#ef4444"],
+        borderWidth: 0,
+        hoverOffset: 8,
+      }]
+    },
+    options: {
+      plugins: {
+        legend: { position: "bottom", labels: { usePointStyle: true } },
+      },
+      animation: { duration: 800, easing: "easeOutQuart" },
+      cutout: "75%"
+    }
+  });
 
   function setDefaultDates(){
     const f = form.elements["from"], t = form.elements["to"];
@@ -108,6 +181,7 @@
     for (const [k,v] of d.entries()){ if(v) obj[k]=v; }
     return obj;
   }
+
   function setK(id,val){ document.getElementById(id).textContent = String(val ?? 0); }
 
   async function load(){
@@ -115,13 +189,34 @@
     const r = await authFetch(`/api/metrics/summary?${params}`);
     if(!r.ok) return;
     const m = await r.json();
-    setK("k_open", m.open);
-    setK("k_inp", m.in_progress);
-    setK("k_res", m.resolved);
-    setK("k_clo", m.closed);
+
+    // Estados
+    setK("k_open", m.by_state?.open || 0);
+    setK("k_inp", m.by_state?.in_progress || 0);
+    setK("k_res", m.by_state?.resolved || 0);
+    setK("k_clo", m.by_state?.closed || 0);
     setK("k_crit", m.critical);
     setK("k_mttr", m.mttr_hours);
     setK("k_frt", m.frt_hours);
+
+    // SLA
+    setK("k_sla_compliance", (m.sla_compliance ?? 0) + "%");
+    setK("k_sla_in", m.sla_in_time);
+    setK("k_sla_risk", m.sla_risk);
+    setK("k_sla_breach", m.sla_breached);
+
+    const total = (m.sla_in_time + m.sla_risk + m.sla_breached) || 1;
+    const pctIn = (m.sla_in_time * 100 / total);
+    const pctNear = (m.sla_risk * 100 / total);
+    const pctBreach = (m.sla_breached * 100 / total);
+
+    document.getElementById("bar_in").style.width = pctIn + "%";
+    document.getElementById("bar_near").style.width = pctNear + "%";
+    document.getElementById("bar_breach").style.width = pctBreach + "%";
+
+    // 🎯 Actualiza el gráfico donut con animación
+    slaChart.data.datasets[0].data = [m.sla_in_time, m.sla_risk, m.sla_breached];
+    slaChart.update();
   }
 
   form.addEventListener("submit", e=>{ e.preventDefault(); load(); });
