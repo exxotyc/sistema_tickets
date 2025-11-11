@@ -162,8 +162,9 @@ class Ticket(models.Model):
         Se basa en la prioridad y tiempo transcurrido desde su creación.
         """
         sla = calculate_sla_status(self)
+        # Evitar recursión: actualizamos directamente sin disparar save()
+        type(self).objects.filter(pk=self.pk).update(breach_risk=sla["breach_risk"])
         self.breach_risk = sla["breach_risk"]
-        self.save(update_fields=["breach_risk"])
         return sla
 
     def get_sla_label(self):

@@ -3,6 +3,7 @@ from datetime import timedelta
 from time import perf_counter
 import re
 import json
+import io, csv
 
 from django.contrib import messages
 from django.contrib.auth import get_user_model, logout
@@ -21,18 +22,22 @@ from django.utils.dateparse import parse_date, parse_datetime
 from django.db.models import Min
 from datetime import datetime, time
 from django.utils.timezone import make_aware, get_current_timezone
-from django.db.models import Count, Q
 from urllib.parse import urlencode
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework import permissions
+
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import viewsets, permissions, filters, status, mixins
+from rest_framework import serializers as drf_serializers
+from rest_framework.decorators import (
+    action,
+    api_view,
+    permission_classes,
+    authentication_classes,
+)
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
-import io, csv
-from django.contrib.auth import get_user_model
+from rest_framework.authentication import SessionAuthentication
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
-
-
-UserModel = get_user_model()
-
 
 try:
     import openpyxl
@@ -43,22 +48,6 @@ try:
     from reportlab.pdfgen import canvas
 except Exception:
     canvas = None
-
-from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import viewsets, permissions, filters, status, mixins
-from rest_framework import serializers as drf_serializers
-from rest_framework.decorators import (
-    action,
-    api_view,
-    permission_classes,
-    authentication_classes,
-    throttle_classes,
-)
-from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
-from rest_framework.response import Response
-from rest_framework.authentication import SessionAuthentication
-from rest_framework.throttling import ScopedRateThrottle
-from rest_framework.exceptions import PermissionDenied
 
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
@@ -94,7 +83,7 @@ from .services.assets import build_asset_history
 from .services.metrics import TicketMetricsService
 
 
-
+# ---------- Parámetros comunes de filtros ----------
 FILTER_QUERY_PARAMS = [
     openapi.Parameter("from", openapi.IN_QUERY, description="Fecha inicial (YYYY-MM-DD)", type=openapi.TYPE_STRING),
     openapi.Parameter("to", openapi.IN_QUERY, description="Fecha final (YYYY-MM-DD)", type=openapi.TYPE_STRING),
@@ -174,14 +163,13 @@ class FAQViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         return Response({"status": "recorded", "feedback_id": feedback.pk})
 
 
-
 class TicketViewSet(viewsets.ModelViewSet):
     """
     ViewSet principal para gestionar Tickets.
     Controla visibilidad y permisos según rol:
     - admin: ve y edita todos
     - técnico: solo sus tickets asignados, puede cambiar estado o asignarse
-    - solicitante: solo sus propios tickets
+    - usuario: solo sus propios tickets
     """
     serializer_class = TicketSerializer
     permission_classes = [IsAuthenticated]
@@ -247,16 +235,17 @@ class TicketViewSet(viewsets.ModelViewSet):
             return Response({"error": "user_id requerido"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            target_user = UserModel.objects.get(pk=user_id)
-        except UserModel.DoesNotExist:
+            target_user = get_user_model().objects.get(pk=user_id)
+        except get_user_model().DoesNotExist:
             return Response({"error": "Usuario no encontrado"}, status=status.HTTP_404_NOT_FOUND)
 
-      # Si es técnico, solo puede asignarse a sí mismo, o a un ticket sin asignar
+        # Si es técnico, solo puede asignarse a sí mismo, o a un ticket sin asignar
         if is_tech and target_user != user:
             if ticket.assigned_to and ticket.assigned_to != user:
-                return Response({"error": "No puedes asignar tickets que ya están asignados a otros."},
-                        status=status.HTTP_403_FORBIDDEN)
-
+                return Response(
+                    {"error": "No puedes asignar tickets que ya están asignados a otros."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
 
         previous = ticket.assigned_to
         ticket.assigned_to = target_user
@@ -278,173 +267,6 @@ class TicketViewSet(viewsets.ModelViewSet):
             "assigned_to": target_user.username,
             "by": user.username
         })
-
-
-
-ASSET_QUERY_PARAMS = [
-    openapi.Parameter(
-        "from",
-        openapi.IN_QUERY,
-        description="Fecha mínima de creación (YYYY-MM-DD o ISO).",
-        type=openapi.TYPE_STRING,
-        required=False,
-    ),
-    openapi.Parameter(
-        "to",
-        openapi.IN_QUERY,
-        description="Fecha máxima de creación (YYYY-MM-DD o ISO).",
-        type=openapi.TYPE_STRING,
-        required=False,
-    ),
-    openapi.Parameter(
-        "n",
-        openapi.IN_QUERY,
-        description="Máximo de tickets retornados dentro del rango de M días.",
-        type=openapi.TYPE_INTEGER,
-        required=False,
-    ),
-    openapi.Parameter(
-        "m",
-        openapi.IN_QUERY,
-        description="Cantidad de días hacia atrás para aplicar la regla N/M.",
-        type=openapi.TYPE_INTEGER,
-        required=False,
-    ),
-    openapi.Parameter(
-        "format",
-        openapi.IN_QUERY,
-        description="Formato de salida (json, csv o pdf).",
-        type=openapi.TYPE_STRING,
-        required=False,
-    ),
-]
-
-
-def _filter_asset_history(asset_id, request):
-    qs = Ticket.objects.filter(asset_id=asset_id)
-    qs = apply_ticket_filters(qs, request)
-    n_param = request.GET.get("n")
-    m_param = request.GET.get("m")
-
-    try:
-        n_value = int(n_param) if n_param else None
-        m_value = int(m_param) if m_param else None
-    except ValueError:
-        raise ValueError("n y m deben ser enteros positivos")
-
-    if n_value is not None and n_value <= 0:
-        raise ValueError("n debe ser mayor que cero")
-    if m_value is not None and m_value <= 0:
-        raise ValueError("m debe ser mayor que cero")
-
-    if m_value is not None:
-        window_start = now() - timedelta(days=m_value)
-        qs = qs.filter(created_at__gte=window_start)
-
-    qs = qs.order_by("-created_at")
-    if n_value is not None:
-        qs = qs[:n_value]
-    return qs
-
-
-def _asset_export_payload(qs, fmt, asset_id, params_footer):
-    fmt = (fmt or "json").lower()
-    if fmt == "json":
-        serializer = TicketSerializer(qs, many=True)
-        return Response({"asset": asset_id, "tickets": serializer.data})
-
-    headers = [
-        "ID",
-        "Título",
-        "Estado",
-        "Prioridad",
-        "Categoría",
-        "Asignado",
-        "Creado",
-    ]
-
-    if fmt == "csv":
-        buffer = io.StringIO()
-        writer = csv.writer(buffer)
-        writer.writerow(headers)
-        for ticket in qs:
-            writer.writerow(
-                [
-                    ticket.id,
-                    ticket.title,
-                    ticket.state,
-                    ticket.priority,
-                    ticket.category.name if ticket.category else "",
-                    ticket.assigned_to.username if ticket.assigned_to else "",
-                    ticket.created_at.isoformat(),
-                ]
-            )
-        writer.writerow([])
-        writer.writerow([f"Parámetros: {params_footer}"])
-        payload = buffer.getvalue().encode("utf-8-sig")
-        response = Response(payload)
-        response["Content-Type"] = "text/csv; charset=utf-8"
-        response["Content-Disposition"] = f'attachment; filename="asset_{asset_id}_tickets.csv"'
-        return response
-
-    if fmt == "pdf":
-        if not canvas:
-            return Response({"error": "reportlab no instalado"}, status=501)
-        buffer = io.BytesIO()
-        pdf = canvas.Canvas(buffer)
-        pdf.setFont("Helvetica", 10)
-        y = 800
-        pdf.drawString(40, y, f"Tickets del activo {asset_id}")
-        y -= 20
-        pdf.drawString(40, y, f"Parámetros: {params_footer}")
-        y -= 20
-        for ticket in qs:
-            line = " | ".join(
-                [
-                    f"#{ticket.id}",
-                    ticket.title,
-                    ticket.state,
-                    ticket.priority,
-                    ticket.category.name if ticket.category else "",
-                    ticket.assigned_to.username if ticket.assigned_to else "",
-                    ticket.created_at.strftime("%Y-%m-%d %H:%M"),
-                ]
-            )
-            pdf.drawString(40, y, line[:200])
-            y -= 14
-            if y < 60:
-                pdf.showPage()
-                pdf.setFont("Helvetica", 10)
-                y = 800
-        pdf.showPage()
-        pdf.save()
-        payload = buffer.getvalue()
-        response = Response(payload)
-        response["Content-Type"] = "application/pdf"
-        response["Content-Disposition"] = f'attachment; filename="asset_{asset_id}_tickets.pdf"'
-        return response
-
-    raise ValueError("Formato inválido")
-
-
-@swagger_auto_schema(method="get", manual_parameters=ASSET_QUERY_PARAMS)
-@api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated])
-@throttle_classes([ScopedRateThrottle])
-def asset_ticket_history(request, asset_id):
-    request.throttle_scope = "assets"
-    try:
-        qs = _filter_asset_history(asset_id, request)
-    except ValueError as exc:
-        return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-
-    footer = filters_footer(request.GET)
-    fmt = request.GET.get("format", "json")
-    try:
-        response = _asset_export_payload(qs, fmt, asset_id, footer)
-    except ValueError as exc:
-        return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-    return response
 
 
 class CommentViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
@@ -469,7 +291,8 @@ class CommentViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets.Ge
             from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied("No autorizado para comentar este ticket")
         serializer.save(user=u, ticket=t)
-        
+
+
 class AttachmentViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
     queryset = Attachment.objects.select_related("ticket", "user").all().order_by("-created_at")
     serializer_class = TicketAttachmentSerializer
@@ -484,10 +307,12 @@ class AttachmentViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets
         u = self.request.user
         return qs if _is_admin_or_tech(u) else qs.filter(Q(ticket__requester=u) | Q(ticket__assigned_to=u)).distinct()
 
+
 class TicketLogViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = TicketLog.objects.select_related("user", "ticket").all().order_by("-created_at")
     serializer_class = TicketLogSerializer
     permission_classes = [permissions.IsAuthenticated]
+
 
 class UserViewSet(viewsets.ModelViewSet):
     """
@@ -498,7 +323,7 @@ class UserViewSet(viewsets.ModelViewSet):
     """
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = UserAdminSerializer  # Por defecto
-    queryset = UserModel.objects.all().order_by("username").prefetch_related("groups")
+    queryset = get_user_model().objects.all().order_by("username").prefetch_related("groups")
 
     def get_serializer_class(self):
         # 🔹 Para listados o lectura, usamos el serializer liviano
@@ -509,8 +334,8 @@ class UserViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        username_field = getattr(UserModel, "USERNAME_FIELD", "username")
-        qs = UserModel.objects.all().order_by(username_field).prefetch_related("groups")
+        username_field = getattr(get_user_model(), "USERNAME_FIELD", "username")
+        qs = get_user_model().objects.all().order_by(username_field).prefetch_related("groups")
 
         # Admin → ve todos
         if user.groups.filter(name="admin").exists() or user.is_staff or user.is_superuser:
@@ -518,7 +343,7 @@ class UserViewSet(viewsets.ModelViewSet):
         # Técnico → ve técnicos y admins
         elif user.groups.filter(name="tecnico").exists():
             qs = qs.filter(groups__name__in=["tecnico", "admin"]).distinct()
-        # Solicitante → solo él mismo
+        # usuario → solo él mismo
         else:
             qs = qs.filter(pk=user.pk)
 
@@ -799,11 +624,9 @@ def ticket_list(request):
             "tickets_ids": ids,
             "state": state,
             "q": q,
-            "is_tecnico": is_tecnico,  # 👈 agregado
+            "is_tecnico": is_tecnico,
         },
     )
-
-
 
 
 @login_required
@@ -882,22 +705,16 @@ def maint_section(request, code: str):
 
 # ---------- Roles (UI) ----------
 
-# -------- Helpers de RBAC ----------
-def _is_adminlike(u):
-    # Ajusta si tienes otra forma de comprobar admin
-    return u.is_superuser or u.groups.filter(name="admin").exists()
-
 def _is_admin_or_tech(u):
     return u.is_superuser or u.groups.filter(name__in=["admin", "tecnico"]).exists()
 
-# ---------- Roles (UI) ----------
 @login_required
 @user_passes_test(_is_admin_or_tech)
 def maint_roles(request):
     rbac.ensure_groups_exist()
 
-    username_field = getattr(UserModel, "USERNAME_FIELD", "username")
-    users_qs = UserModel.objects.order_by(username_field).prefetch_related("groups")
+    username_field = getattr(get_user_model(), "USERNAME_FIELD", "username")
+    users_qs = get_user_model().objects.order_by(username_field).prefetch_related("groups")
     users_list = list(users_qs)
 
     def _display_name(user):
@@ -965,7 +782,7 @@ def roles_data(request):
 
         roles = list(u.groups.values_list("name", flat=True))
         if not roles:
-            roles = ["solicitante"]
+            roles = ["usuario"]
 
         data.append({
             "id": u.id,
@@ -994,12 +811,12 @@ def roles_update(request):
         return JsonResponse({"ok": False, "error": "JSON inválido"}, status=400)
 
     try:
-        target = UserModel.objects.get(pk=user_id)
-    except UserModel.DoesNotExist:
+        target = get_user_model().objects.get(pk=user_id)
+    except get_user_model().DoesNotExist:
         return JsonResponse({"ok": False, "error": "Usuario no existe"}, status=404)
 
     # Normaliza roles válidos
-    MANAGED_ROLE_NAMES = {"admin", "tecnico", "solicitante"}
+    MANAGED_ROLE_NAMES = {"admin", "tecnico", "usuario"}
     roles = [r for r in roles if r in MANAGED_ROLE_NAMES]
 
     # Exclusión mutua admin/tecnico
@@ -1009,7 +826,7 @@ def roles_update(request):
     # 🚫 Validar último admin
     from django.contrib.auth.models import Group
     admin_group, _ = Group.objects.get_or_create(name="admin")
-    current_admins = UserModel.objects.filter(groups=admin_group).exclude(pk=target.pk)
+    current_admins = get_user_model().objects.filter(groups=admin_group).exclude(pk=target.pk)
     if not current_admins.exists() and "admin" not in roles:
         return JsonResponse({
             "ok": False,
@@ -1025,9 +842,9 @@ def roles_update(request):
     if roles:
         target.groups.add(*Group.objects.filter(name__in=roles))
     else:
-        solicitante = Group.objects.get(name="solicitante")
-        target.groups.add(solicitante)
-        roles = ["solicitante"]
+        usuario = Group.objects.get(name="usuario")
+        target.groups.add(usuario)
+        roles = ["usuario"]
 
     # Guarda y devuelve datos actualizados
     target.save()
@@ -1454,6 +1271,7 @@ def asset_ticket_history(request, asset_id: str):
 
     return Response({"error": "format inválido (json|csv|pdf)"}, status=400)
 
+
 @login_required
 def metrics_page(request):
     User = get_user_model()
@@ -1468,8 +1286,8 @@ def metrics_page(request):
         request,
         "tickets/metrics.html",
         {
-            "techs": techs,          # para el filtro de técnico/asignado
-            "categories": categories # para el filtro de categoría
+            "techs": techs,
+            "categories": categories
         },
     )
 
@@ -1548,7 +1366,7 @@ def asset_history_page(request, asset_id: str):
 # ---------------------------------------------------
 # MÉTRICAS API
 # ---------------------------------------------------
-@api_view(["GET"])  # 👈 Este DEBE ir primero
+@api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
 @swagger_auto_schema(manual_parameters=FILTER_QUERY_PARAMS)
 def metrics_summary(request):
