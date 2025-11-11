@@ -4,7 +4,7 @@ from django.views.generic import RedirectView
 from django.contrib.auth.views import LoginView
 from rest_framework import routers
 from rest_framework_simplejwt.views import TokenRefreshView
-
+from . import views_users
 from . import views
 from .views import (
     TicketViewSet,
@@ -75,12 +75,18 @@ web_urlpatterns = [
     # ----------------------------
     path("mantenedor/", views.maint_index, name="maint_index"),
 
-    # ⚠️ IMPORTANTE: primero las rutas específicas
+    #  MANTENEDOR DE ROLES
     path("mantenedor/roles/", views.maint_roles, name="maint_roles"),
     path("mantenedor/roles/data/", views.roles_data, name="roles_data"),
     path("mantenedor/roles/update/", views.roles_update, name="roles_update"),
     path("mantenedor/roles/set/", views.maint_roles_set, name="maint_roles_set"),
 
+
+    #Mantenedor de usuarios
+    path("mantenedor/usuarios/", views_users.users_page, name="maint_usuarios"),
+    path("mantenedor/usuarios/data/", views_users.users_data, name="users_data"),
+    path("mantenedor/usuarios/save/", views_users.users_save, name="users_save"),
+    path("mantenedor/usuarios/toggle/", views_users.users_toggle_active, name="users_toggle"),
     # Luego la genérica (debe ir al final)
     path("mantenedor/<slug:code>/", views.maint_section, name="maint_section"),
 

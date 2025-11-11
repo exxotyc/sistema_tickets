@@ -145,26 +145,24 @@
                 </a>
               </li>
 
-              {% if maint_sections %}
-                <li class="nav-item dropdown">
-                  <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown" role="button" aria-expanded="false">
-                    <i class="bi bi-gear me-1"></i>Mantenedor
-                  </a>
-                  <ul class="dropdown-menu">
-                    {% if request.user.is_staff %}
-                      <li><a class="dropdown-item" href="{% url 'maint_roles' %}">Roles</a></li>
-                      <li><hr class="dropdown-divider"></li>
-                    {% endif %}
+            {% if maint_sections %}
+  <li class="nav-item dropdown">
+    <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown" role="button" aria-expanded="false">
+      <i class="bi bi-gear me-1"></i>Mantenedor
+    </a>
+    <ul class="dropdown-menu">
 
-                    {% for s in maint_sections %}
-                      <li><a class="dropdown-item" href="{% url 'maint_section' s.code %}">{{ s.title }}</a></li>
-                    {% endfor %}
+      {% for s in maint_sections %}
+        <li><a class="dropdown-item" href="{% url 'maint_section' s.code %}">{{ s.title }}</a></li>
+      {% endfor %}
 
-                    <li><hr class="dropdown-divider"></li>
-                    <li><a class="dropdown-item" href="{% url 'maint_index' %}">Ver todas</a></li>
-                  </ul>
-                </li>
-              {% endif %}
+      {% if request.user.is_staff %}
+        <li><hr class="dropdown-divider"></li>
+      {% endif %}
+      <li><a class="dropdown-item" href="{% url 'maint_index' %}">Ver todas</a></li>
+    </ul>
+  </li>
+{% endif %}
             {% endif %}
           </ul>
 

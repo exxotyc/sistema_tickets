@@ -147,7 +147,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   async function loadUsers(){
     rows.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Cargando usuarios…</td></tr>';
     try {
-      const url = "{% url 'roles_data' %}";
+      const url = "{% url 'roles_data' %}" + (search.value ? ("?q=" + encodeURIComponent(search.value)) : "");
       const response = await fetch(url);
       const data = await response.json();
 
@@ -190,15 +190,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  search.addEventListener("input", ()=>{
-    const term = search.value.toLowerCase();
-    const filtered = users.filter(u =>
-      (u.username||"").toLowerCase().includes(term) ||
-      (u.email||"").toLowerCase().includes(term) ||
-      (u.roles||[]).join(" ").toLowerCase().includes(term)
-    );
-    render(filtered);
-  });
+ search.addEventListener("input", ()=>{
+   loadUsers();  // delega el filtrado al backend con ?q=
+ });
 
   rows.addEventListener("click", ev=>{
     const btn = ev.target.closest("button[data-id]");
@@ -227,11 +221,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     saveBtn.disabled = true;
     formMsg.classList.add("d-none");
 
-    const res = await fetch("{% url 'roles_update' %}", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-CSRFToken": "{{ csrf_token }}" },
-      body: JSON.stringify(payload)
-    });
+ const res = await fetch("{% url 'maint_roles_set' %}", {
+   method: "POST",
+   headers: { "Content-Type": "application/json", "X-CSRFToken": "{{ csrf_token }}" },
+   body: JSON.stringify(payload)
+});
     const j = await res.json().catch(()=>({}));
 
     saveBtn.disabled = false;

@@ -4,6 +4,7 @@ from time import perf_counter
 import re
 import json
 import io, csv
+from django.contrib.auth import get_user_model
 
 from django.contrib import messages
 from django.contrib.auth import get_user_model, logout
@@ -763,8 +764,16 @@ def roles_data(request):
         return HttpResponseForbidden("No autorizado")
 
     q = (request.GET.get("q") or "").strip().lower()
-    username_field = getattr(UserModel, "USERNAME_FIELD", "username")
-    users = UserModel.objects.order_by(username_field)
+
+    # ✅ Usa el modelo de usuario correcto
+    User = get_user_model()
+    username_field = getattr(User, "USERNAME_FIELD", "username")
+
+    users = (
+        User.objects.order_by(username_field)
+        .only("id", "username", "email", "first_name", "last_name", "is_staff")
+        .prefetch_related("groups")
+    )
 
     if q:
         users = users.filter(
@@ -780,7 +789,9 @@ def roles_data(request):
         base_name = getattr(u, username_field) or u.get_username()
         display = f"{full_name} ({u.get_username()})" if full_name else base_name
 
-        roles = list(u.groups.values_list("name", flat=True))
+        # ✅ Usa tus helpers RBAC para roles administrables (consistente con el resto)
+        from .rbac import user_managed_roles
+        roles = user_managed_roles(u)
         if not roles:
             roles = ["usuario"]
 
