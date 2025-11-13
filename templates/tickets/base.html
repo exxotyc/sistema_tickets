@@ -48,52 +48,50 @@
       .notif-badge{ position:absolute; top:-6px; right:-6px; }
 
       /* ==== Botones exclusivos de la página de tickets ==== */
-.btn-ticket {
-  position: relative;
-  overflow: hidden;
-  isolation: isolate;
-  display: inline-flex !important;
-  align-items: center;
-  justify-content: center;
-  gap: .35rem;
-  padding: .45rem .9rem !important;
-  font-size: .9rem !important;
-  min-width: 85px;            /* asegura espacio suficiente para "Nuevo" */
-  line-height: 1.25;
-}
+      .btn-ticket {
+        position: relative;
+        overflow: hidden;
+        isolation: isolate;
+        display: inline-flex !important;
+        align-items: center;
+        justify-content: center;
+        gap: .35rem;
+        padding: .45rem .9rem !important;
+        font-size: .9rem !important;
+        min-width: 85px;
+        line-height: 1.25;
+      }
 
-.btn-ticket > * {
-  position: relative;
-  z-index: 1;
-}
+      .btn-ticket > * {
+        position: relative;
+        z-index: 1;
+      }
 
-/* Efecto ripple debajo del texto */
-.btn-ticket::after {
-  content: "";
-  position: absolute;
-  left: var(--x, 50%);
-  top: var(--y, 50%);
-  transform: translate(-50%, -50%) scale(0);
-  width: var(--d, 0);
-  height: var(--d, 0);
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.18;
-  transition: transform 0.45s ease, opacity 0.6s ease;
-  pointer-events: none;
-  z-index: 0;
-}
+      .btn-ticket::after {
+        content: "";
+        position: absolute;
+        left: var(--x, 50%);
+        top: var(--y, 50%);
+        transform: translate(-50%, -50%) scale(0);
+        width: var(--d, 0);
+        height: var(--d, 0);
+        border-radius: 50%;
+        background: currentColor;
+        opacity: 0.18;
+        transition: transform 0.45s ease, opacity 0.6s ease;
+        pointer-events: none;
+        z-index: 0;
+      }
 
-.btn-ticket:active::after {
-  transform: translate(-50%, -50%) scale(1);
-  opacity: 0.3;
-}
+      .btn-ticket:active::after {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 0.3;
+      }
 
-/* === Ancho justo para el campo de búsqueda === */
-.search-compact {
-  width: 230px;  /* Ajusta según el tamaño del texto del placeholder */
-  min-width: 220px;
-}
+      .search-compact {
+        width: 230px;
+        min-width: 220px;
+      }
     </style>
   </head>
 
@@ -107,7 +105,9 @@
     <div id="notifPanel" class="card shadow-sm" style="position:fixed; right:18px; bottom:74px; width:320px; display:none; z-index:1080;">
       <div class="card-header d-flex justify-content-between align-items-center">
         <span>Notificaciones</span>
-        <button class="btn btn-sm btn-outline-secondary" id="notifClose" aria-label="Cerrar"><i class="bi bi-x-lg"></i></button>
+        <button class="btn btn-sm btn-outline-secondary" id="notifClose" aria-label="Cerrar">
+          <i class="bi bi-x-lg"></i>
+        </button>
       </div>
       <ul id="notifList" class="list-group list-group-flush">
         <li class="list-group-item text-muted">Sin notificaciones.</li>
@@ -115,9 +115,10 @@
     </div>
     {% endif %}
 
-    <nav class="navbar navbar-expand-lg sticky-top">
+    {% if request.user.is_authenticated %}
+    <nav class="navbar navbar-expand-md sticky-top">
       <div class="container">
-        <a class="navbar-brand d-flex align-items-center gap-2" href="{% url 'index' %}">
+        <a class="navbar-brand d-flex align-items-center gap-2" href="{% url 'dashboard' %}">
           <i class="bi bi-ticket-perforated-fill text-primary"></i>
           <span>Coyahue Tickets</span>
           <span class="badge rounded-pill badge-soft">Coyahue</span>
@@ -125,6 +126,7 @@
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav" aria-label="Abrir navegación">
           <span class="navbar-toggler-icon"></span>
         </button>
+    {% endif %}
 
         <div id="nav" class="collapse navbar-collapse">
           <ul class="navbar-nav me-auto mb-2 mb-lg-0">
@@ -134,36 +136,61 @@
                   <i class="bi bi-speedometer2 me-1"></i>Dashboard
                 </a>
               </li>
+
               <li class="nav-item">
                 <a class="nav-link" href="{% url 'metrics_page' %}" data-hard-nav="1">
                   <i class="bi bi-graph-up me-1"></i>Métricas
                 </a>
               </li>
+
               <li class="nav-item">
                 <a class="nav-link" href="{% url 'ticket_list' %}" data-hard-nav="1">
                   <i class="bi bi-list-ul me-1"></i>Listado
                 </a>
               </li>
 
-            {% if maint_sections %}
-  <li class="nav-item dropdown">
-    <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown" role="button" aria-expanded="false">
-      <i class="bi bi-gear me-1"></i>Mantenedor
-    </a>
-    <ul class="dropdown-menu">
+              {# ==== Menús según rol (grupos admin / tecnico / usuario) ==== #}
+              {% for g in request.user.groups.all %}
+                {# Reportes: admin o tecnico #}
+                {% if g.name == "admin" or g.name == "tecnico" %}
+                  <li class="nav-item">
+                    <a class="nav-link" href="{% url 'reports_page' %}">
+                      <i class="bi bi-file-bar-graph me-1"></i>Reportes
+                    </a>
+                  </li>
+                {% endif %}
 
-      {% for s in maint_sections %}
-        <li><a class="dropdown-item" href="{% url 'maint_section' s.code %}">{{ s.title }}</a></li>
-      {% endfor %}
+                {# Mantenedor: solo admin #}
+                {% if g.name == "admin" and maint_sections %}
+                  <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown" role="button" aria-expanded="false">
+                      <i class="bi bi-gear-wide-connected me-1"></i>Mantenedor
+                    </a>
+                    <ul class="dropdown-menu">
+                      {% for s in maint_sections %}
+                        <li>
+                          <a class="dropdown-item" href="{% url 'maint_section' s.code %}">
+                            {{ s.title }}
+                          </a>
+                        </li>
+                      {% endfor %}
+                      <li><hr class="dropdown-divider"></li>
+                      <li><a class="dropdown-item" href="{% url 'maint_index' %}">Ver todas</a></li>
+                    </ul>
+                  </li>
 
-      {% if request.user.is_staff %}
-        <li><hr class="dropdown-divider"></li>
-      {% endif %}
-      <li><a class="dropdown-item" href="{% url 'maint_index' %}">Ver todas</a></li>
-    </ul>
-  </li>
-{% endif %}
+                  {# Sistema: también solo admin, después de Mantenedor #}
+                  <li class="nav-item">
+                    <a class="nav-link" href="{% url 'sistema_page' %}">
+                      <i class="bi bi-hdd-network me-1"></i>Sistema
+                    </a>
+                  </li>
+                {% endif %}
+              {% endfor %}
+
             {% endif %}
+          </ul>
+
           </ul>
 
           <div class="d-flex align-items-center gap-2">
@@ -223,13 +250,11 @@
         const currentUser = "{{ request.user.username }}";
         const storedUser = localStorage.getItem("username");
 
-        // Limpia tokens si cambió de usuario
         if (storedUser && storedUser !== currentUser) {
           console.log("🔄 Usuario cambiado:", storedUser, "→", currentUser);
           localStorage.clear();
         }
 
-        // Genera nuevos tokens si no existen o si se limpió
         if(!localStorage.getItem("access_token")){
           try{
             const r = await fetch("{% url 'api:token_session' %}", {

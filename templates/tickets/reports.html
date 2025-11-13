@@ -1,0 +1,212 @@
+{% extends "tickets/base.html" %}
+{% block title %}Reportes · Tickets{% endblock %}
+
+{% block extra_head %}
+<style>
+  .glass {
+    background: rgba(255,255,255,.92);
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(15,23,42,.06);
+    border-radius: 1rem;
+    box-shadow: 0 6px 20px rgba(0,0,0,.05);
+    padding: 1.25rem 1.5rem;
+  }
+  .chart-card {
+    padding: 1rem;
+    border-radius: .75rem;
+    border: 1px solid rgba(15,23,42,.06);
+  }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+
+{% endblock %}
+
+{% block content %}
+<div class="glass mb-3">
+  <div class="d-flex justify-content-between align-items-center">
+    <h1 class="h5 m-0 d-flex align-items-center gap-2">
+      <i class="bi bi-file-bar-graph"></i>
+      <span>Reportes de Tickets</span>
+    </h1>
+    <div class="d-flex gap-2">
+      <a id="btnExportCsv" class="btn btn-outline-secondary btn-sm btn-ripple" href="#">
+        <i class="bi bi-download"></i> Exportar CSV
+      </a>
+    </div>
+  </div>
+</div>
+
+<div class="glass mb-3">
+  <form id="filters" class="row g-2 align-items-end">
+    <div class="col-12 col-md-2">
+      <label class="form-label">Estado</label>
+      <select name="state" class="form-select form-select-sm">
+        {% for val,label in states %}
+          <option value="{{ val }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-12 col-md-3">
+      <label class="form-label">Texto</label>
+      <input name="q" class="form-control form-control-sm" placeholder="Título o descripción">
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label">Desde</label>
+      <input name="date_from" type="date" class="form-control form-control-sm">
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label">Hasta</label>
+      <input name="date_to" type="date" class="form-control form-control-sm">
+    </div>
+    <div class="col-12 col-md-2">
+      <label class="form-label">Asignado</label>
+      <select name="assignee" class="form-select form-select-sm">
+        <option value="">Todos</option>
+        {% for aid, aname in assignees %}
+          <option value="{{ aid }}">{{ aname }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-12 col-md-1 text-end">
+      <button class="btn btn-outline-secondary btn-sm btn-ripple w-100" type="submit">Filtrar</button>
+    </div>
+  </form>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-4">
+    <div class="glass chart-card">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <strong>Por estado</strong>
+        <span id="totalCount" class="badge text-bg-light">0</span>
+      </div>
+      <canvas id="chartState" height="180"></canvas>
+    </div>
+  </div>
+  <div class="col-lg-8">
+    <div class="glass chart-card">
+      <strong>Tickets creados por mes</strong>
+      <canvas id="chartMonth" height="180"></canvas>
+    </div>
+  </div>
+</div>
+
+<div class="glass mt-3">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th style="width:80px">ID</th>
+          <th>Título</th>
+          <th style="width:140px">Estado</th>
+          <th style="width:160px">Asignado</th>
+          <th style="width:160px">Creado</th>
+        </tr>
+      </thead>
+      <tbody id="rows">
+        <tr><td colspan="5" class="text-center text-muted py-4">Sin datos</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const form = document.getElementById("filters");
+  const rows = document.getElementById("rows");
+  const totalCount = document.getElementById("totalCount");
+  const btnExportCsv = document.getElementById("btnExportCsv");
+
+  const chartStateCtx = document.getElementById("chartState");
+  const chartMonthCtx = document.getElementById("chartMonth");
+  let chartState = null, chartMonth = null;
+
+  function qsParams(){
+    const fd = new FormData(form);
+    const p = new URLSearchParams();
+    for(const [k,v] of fd.entries()){
+      if(v !== null && v !== "") p.append(k,v);
+    }
+    return p.toString();
+  }
+
+  async function loadData(){
+    rows.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Cargando…</td></tr>';
+    const url = "{% url 'reports_data' %}?" + qsParams();
+    const r = await fetch(url);
+    const j = await r.json();
+
+    // Tabla
+    if(!j.rows || !j.rows.length){
+      rows.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Sin resultados</td></tr>';
+    }else{
+      rows.innerHTML = j.rows.map(t => `
+        <tr>
+          <td>${t.id}</td>
+          <td>${t.title || '—'}</td>
+          <td>${t.state || '—'}</td>
+          <td>${t.assigned || '—'}</td>
+          <td>${t.created_at || '—'}</td>
+        </tr>
+      `).join("");
+    }
+
+    // Total
+    totalCount.textContent = j.total ?? 0;
+
+    // Chart por estado
+    const labelsState = ["open","in_progress","resolved","closed"];
+    const pretty = {
+      open: "Abiertos",
+      in_progress: "En progreso",
+      resolved: "Resueltos",
+      closed: "Cerrados",
+    };
+    const dataState = labelsState.map(k => j.by_state?.[k] || 0);
+    if(chartState) chartState.destroy();
+   chartState = new Chart(chartStateCtx, {
+  type: "doughnut",
+  plugins: [ChartDataLabels],
+  data: {
+    labels: labelsState.map(k => pretty[k]),
+    datasets: [{ data: dataState }]
+  },
+  options: {
+    responsive: true,
+    plugins: {
+      legend: { position: "bottom" },
+      datalabels: {
+        color: "#000",
+        font: {
+          weight: "bold",
+          size: 12
+        },
+        formatter: (value) => value,  // muestra el número del segmento
+      }
+    }
+  }
+});
+
+    // Chart por mes
+    const labelsMonth = Object.keys(j.by_month || {});
+    const dataMonth = Object.values(j.by_month || {});
+    if(chartMonth) chartMonth.destroy();
+    chartMonth = new Chart(chartMonthCtx, {
+      type: "line",
+      data: { labels: labelsMonth, datasets: [{ data: dataMonth, tension: .3, fill: false }] },
+      options: { responsive: true, plugins: { legend: { display:false } } }
+    });
+
+    // Export CSV con filtros actuales
+    btnExportCsv.href = "{% url 'reports_export_csv' %}?" + qsParams();
+  }
+
+  form.addEventListener("submit", (e) => { e.preventDefault(); loadData(); });
+  // carga inicial
+  loadData();
+});
+</script>
+{% endblock %}

@@ -90,8 +90,22 @@ web_urlpatterns = [
     # Luego la genérica (debe ir al final)
     path("mantenedor/<slug:code>/", views.maint_section, name="maint_section"),
 
+    #reportes
+    path("reportes/", views.reports_page, name="reports_page"),
+    path("reportes/data/", views.reports_data, name="reports_data"),
+    path("reportes/export.csv", views.reports_export_csv, name="reports_export_csv"),
     # Métricas
     path("metrics/", views.metrics_page, name="metrics_page"),
+
+    #Sistema
+    path("sistema/", views.sistema_page, name="sistema_page"),
+    path("sistema/logs/export/", views.sistema_logs_export, name="sistema_logs_export"),
+    path("sistema/usuarios/", views.sistema_user_activity, name="sistema_user_activity"),
+    path("sistema/usuarios/toggle/<int:user_id>/", views.sistema_user_toggle_active, name="sistema_user_toggle_active"),
+    path("sistema/auth-failed/", views.sistema_auth_failed, name="sistema_auth_failed"),
+    path("sistema/mantenimiento-tickets/", views.sistema_ticket_maintenance, name="sistema_ticket_maintenance"),
+    path("sistema/health/", views.sistema_health, name="sistema_health"),
+
 ]
 
 urlpatterns = web_urlpatterns + [

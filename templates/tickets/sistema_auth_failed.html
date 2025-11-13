@@ -1,0 +1,81 @@
+{% extends "tickets/base.html" %}
+
+{% block title %}Sistema · Errores de autenticación{% endblock %}
+
+{% block content %}
+<h1 class="h4 mb-3">
+  <i class="bi bi-shield-lock me-2"></i>Errores de autenticación
+</h1>
+
+<p class="text-muted small">
+  Esta vista asume que estás registrando intentos fallidos en <code>TicketLog</code> con
+  <code>action="auth.failed"</code>.
+</p>
+
+<form method="get" class="row g-2 align-items-end mb-3">
+  <div class="col-sm-4">
+    <label class="form-label small mb-1">Usuario (intentado)</label>
+    <input type="text" name="user" class="form-control form-control-sm"
+           placeholder="username o email" value="{{ user_q }}">
+  </div>
+  <div class="col-sm-3">
+    <label class="form-label small mb-1">Orden</label>
+    <select name="order" class="form-select form-select-sm">
+      <option value="desc" {% if order == "desc" %}selected{% endif %}>Más recientes primero</option>
+      <option value="asc" {% if order == "asc" %}selected{% endif %}>Más antiguos primero</option>
+    </select>
+  </div>
+  <div class="col-sm-3">
+    <label class="form-label small mb-1">Mostrar</label>
+    <select name="limit" class="form-select form-select-sm">
+      <option value="20" {% if limit == 20 %}selected{% endif %}>Últimos 20</option>
+      <option value="50" {% if limit == 50 %}selected{% endif %}>Últimos 50</option>
+      <option value="100" {% if limit == 100 %}selected{% endif %}>Últimos 100</option>
+    </select>
+  </div>
+  <div class="col-sm-2 d-grid">
+    <button class="btn btn-primary btn-sm btn-ripple" type="submit">
+      <i class="bi bi-funnel me-1"></i>Aplicar
+    </button>
+  </div>
+</form>
+
+<div class="card border-0 shadow-sm">
+  <div class="card-body">
+    {% if logs %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Usuario (intentado)</th>
+              <th>IP / Detalle</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for log in logs %}
+              <tr>
+                <td class="small">{{ log.created_at|date:"Y-m-d H:i" }}</td>
+                <td class="small">
+                  {% if log.meta_json.username %}
+                    {{ log.meta_json.username }}
+                  {% elif log.user %}
+                    {{ log.user.username }}
+                  {% else %}
+                    <span class="text-muted">Desconocido</span>
+                  {% endif %}
+                </td>
+                <td class="small text-muted">
+                  {{ log.meta_json|default:"-" }}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="text-muted mb-0">No hay errores de autenticación para los filtros elegidos.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

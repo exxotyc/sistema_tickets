@@ -1,0 +1,111 @@
+{% extends "tickets/base.html" %}
+
+{% block title %}Sistema · Coyahue{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <h1 class="h4 mb-1">
+    <i class="bi bi-hdd-network me-2"></i>Panel de sistema
+  </h1>
+  <p class="text-muted mb-0">
+    Herramientas de administración y mantenimiento del sistema.
+  </p>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <h2 class="h6 text-muted mb-2">Administradores</h2>
+        <p class="display-6 mb-0">{{ admins_count }}</p>
+        <small class="text-muted">Usuarios con rol <code>admin</code></small>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <h2 class="h6 text-muted mb-2">Técnicos</h2>
+        <p class="display-6 mb-0">{{ techs_count }}</p>
+        <small class="text-muted">Usuarios con rol <code>tecnico</code></small>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <h2 class="h6 text-muted mb-2">Solicitantes</h2>
+        <p class="display-6 mb-0">{{ users_count }}</p>
+        <small class="text-muted">Usuarios con rol <code>usuario</code></small>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# Tarjetas de herramientas #}
+<div class="row g-3">
+  <div class="col-md-6 col-xl-3">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body d-flex flex-column">
+        <h2 class="h6 mb-2">
+          <i class="bi bi-people me-2"></i>Actividad de usuarios
+        </h2>
+        <p class="text-muted small flex-grow-1 mb-3">
+          Ver últimos accesos, buscar usuarios y activar/desactivar cuentas.
+        </p>
+        <a href="{% url 'sistema_user_activity' %}" class="btn btn-sm btn-primary btn-ripple mt-auto">
+          Abrir herramienta
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6 col-xl-3">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body d-flex flex-column">
+        <h2 class="h6 mb-2">
+          <i class="bi bi-shield-lock me-2"></i>Errores de autenticación
+        </h2>
+        <p class="text-muted small flex-grow-1 mb-3">
+          Revisar intentos fallidos de inicio de sesión y detectar patrones sospechosos.
+        </p>
+        <a href="{% url 'sistema_auth_failed' %}" class="btn btn-sm btn-primary btn-ripple mt-auto">
+          Ver errores
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6 col-xl-3">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body d-flex flex-column">
+        <h2 class="h6 mb-2">
+          <i class="bi bi-wrench-adjustable-circle me-2"></i>Mantenimiento de tickets
+        </h2>
+        <p class="text-muted small flex-grow-1 mb-3">
+          Detectar tickets sin categoría, sin técnico asignado o abiertos hace demasiado tiempo.
+        </p>
+        <a href="{% url 'sistema_ticket_maintenance' %}" class="btn btn-sm btn-primary btn-ripple mt-auto">
+          Revisar tickets
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6 col-xl-3">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body d-flex flex-column">
+        <h2 class="h6 mb-2">
+          <i class="bi bi-heart-pulse me-2"></i>Health del sistema
+        </h2>
+        <p class="text-muted small flex-grow-1 mb-3">
+          Información básica de entorno, base de datos y configuración para diagnósticos rápidos.
+        </p>
+        <a href="{% url 'sistema_health' %}" class="btn btn-sm btn-primary btn-ripple mt-auto">
+          Ver estado
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

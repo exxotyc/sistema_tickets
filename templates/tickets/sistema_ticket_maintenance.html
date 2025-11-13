@@ -1,0 +1,110 @@
+{% extends "tickets/base.html" %}
+
+{% block title %}Sistema · Mantenimiento de tickets{% endblock %}
+
+{% block content %}
+<h1 class="h4 mb-3">
+  <i class="bi bi-wrench-adjustable-circle me-2"></i>Mantenimiento de tickets
+</h1>
+
+<p class="text-muted small mb-4">
+  Esta vista muestra posibles inconsistencias para que el administrador pueda revisarlas.
+</p>
+
+<div class="mb-4">
+  <h2 class="h6 mb-2">Tickets sin categoría</h2>
+  {% if tickets_no_category %}
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Título</th>
+            <th>Estado</th>
+            <th>Solicitante</th>
+            <th>Creado</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in tickets_no_category %}
+            <tr>
+              <td><a href="{% url 'ticket_detail' t.id %}">#{{ t.id }}</a></td>
+              <td>{{ t.title }}</td>
+              <td class="small">{{ t.state }}</td>
+              <td class="small">{{ t.requester.username }}</td>
+              <td class="small">{{ t.created_at|date:"Y-m-d H:i" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="text-muted small">No hay tickets sin categoría.</p>
+  {% endif %}
+</div>
+
+<div class="mb-4">
+  <h2 class="h6 mb-2">Tickets "en progreso" sin técnico asignado</h2>
+  {% if tickets_inprogress_no_assignee %}
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Título</th>
+            <th>Solicitante</th>
+            <th>Creado</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in tickets_inprogress_no_assignee %}
+            <tr>
+              <td><a href="{% url 'ticket_detail' t.id %}">#{{ t.id }}</a></td>
+              <td>{{ t.title }}</td>
+              <td class="small">{{ t.requester.username }}</td>
+              <td class="small">{{ t.created_at|date:"Y-m-d H:i" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="text-muted small">No hay tickets "in_progress" sin técnico asignado.</p>
+  {% endif %}
+</div>
+
+<div class="mb-4">
+  <h2 class="h6 mb-2">Tickets abiertos/En progreso muy antiguos</h2>
+  <p class="text-muted small">
+    Considerando tickets creados antes de {{ cutoff|date:"Y-m-d" }}.
+  </p>
+  {% if tickets_stale %}
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Título</th>
+            <th>Estado</th>
+            <th>Solicitante</th>
+            <th>Creado</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in tickets_stale %}
+            <tr>
+              <td><a href="{% url 'ticket_detail' t.id %}">#{{ t.id }}</a></td>
+              <td>{{ t.title }}</td>
+              <td class="small">{{ t.state }}</td>
+              <td class="small">{{ t.requester.username }}</td>
+              <td class="small">{{ t.created_at|date:"Y-m-d H:i" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="text-muted small">No hay tickets muy antiguos sin cerrar para el criterio actual.</p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -5,14 +5,17 @@ import re
 import json
 import io, csv
 from django.contrib.auth import get_user_model
-
+from collections import Counter, defaultdict
+import sys
+import django
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model, logout
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.db.models import Q, Count
 from django.utils.timezone import now
 from django.shortcuts import render, redirect, get_object_or_404
-from django.http import Http404, HttpResponseForbidden, JsonResponse
+from django.http import Http404, HttpResponseForbidden, JsonResponse, HttpResponse
 from django.urls import reverse
 from django.template.response import TemplateResponse
 from django.views.decorators.http import require_GET, require_POST
@@ -24,7 +27,8 @@ from django.db.models import Min
 from datetime import datetime, time
 from django.utils.timezone import make_aware, get_current_timezone
 from urllib.parse import urlencode
-
+from django.utils import timezone
+import io, csv, json
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets, permissions, filters, status, mixins
 from rest_framework import serializers as drf_serializers
@@ -92,6 +96,15 @@ FILTER_QUERY_PARAMS = [
     openapi.Parameter("assignee", openapi.IN_QUERY, description="ID de técnico asignado", type=openapi.TYPE_INTEGER),
     openapi.Parameter("priority", openapi.IN_QUERY, description="Prioridad (low, medium, high)", type=openapi.TYPE_STRING),
 ]
+
+REPORT_STATE_CHOICES = [
+    ("", "Todos"),
+    ("open", "Abiertos"),
+    ("in_progress", "En progreso"),
+    ("resolved", "Resueltos"),
+    ("closed", "Cerrados"),
+]
+
 
 #==================== Helpers ====================
 
@@ -648,66 +661,76 @@ def logout_view(request):
     return redirect("index")
 
 # ==================== Mantenedor ====================
-
 @login_required
 def maint_index(request):
-    if not (_is_adminlike(request.user) or request.user.has_perm("tickets.access_maint")):
+    # Solo admin estricto (superuser, staff o grupo "admin") 
+    # o quien tenga el permiso explícito "tickets.access_maint"
+    if not (_is_admin_strict(request.user) or request.user.has_perm("tickets.access_maint")):
         return HttpResponseForbidden("No autorizado")
 
     sections = Section.objects.filter(is_active=True).order_by("title")
     allowed = []
     for s in sections:
-        if _is_adminlike(request.user) or s.groups.filter(
+        if _is_admin_strict(request.user) or s.groups.filter(
             id__in=request.user.groups.values_list("id", flat=True)
         ).exists():
             allowed.append(s)
 
-    return _render(request, "tickets/maint_index.html", {
-        "sections": allowed,
-        "maint_sections": [{"code": s.code, "name": s.title, "title": s.title} for s in allowed],
-    })
+    return _render(
+        request,
+        "tickets/maint_index.html",
+        {
+            "sections": allowed,
+            "maint_sections": [
+                {"code": s.code, "name": s.title, "title": s.title}
+                for s in allowed
+            ],
+        },
+    )
+
 
 @login_required
 def maint_section(request, code: str):
+    # Busca la sección activa
     sec = get_object_or_404(Section, code=code, is_active=True)
-    if not (_is_adminlike(request.user) or sec.groups.filter(
+
+    # Solo admin estricto o usuarios que tengan la sección asignada por grupo
+    if not (_is_admin_strict(request.user) or sec.groups.filter(
         id__in=request.user.groups.values_list("id", flat=True)
     ).exists()):
         return HttpResponseForbidden("No autorizado")
 
     tpl_specific = f"tickets/maint_{code}.html"
     tpl_fallback = "tickets/maint_section.html"
+
     ctx = {
         "section": sec,
         "code": sec.code,
         "maint_sections": _navbar_sections(request.user),
     }
-    if code == "usuarios":
-        allowed_roles = sorted(rbac.actor_allowed_roles(request.user))
-        managed_roles = sorted(rbac.MANAGED_ROLE_NAMES)
-        role_options = [
-            {"code": r, "label": rbac.ROLE_LABELS.get(r, r.title())}
-            for r in managed_roles
-        ]
-        ctx.update(
-            {
-                "allowed_roles": allowed_roles,
-                "managed_roles": managed_roles,
-                "allowed_roles_json": json.dumps(allowed_roles),
-                "managed_roles_json": json.dumps(managed_roles),
-                "role_labels_json": json.dumps(rbac.ROLE_LABELS),
-                "role_labels": rbac.ROLE_LABELS,
-                "can_manage_staff": request.user.is_staff or request.user.is_superuser,
-                "role_options": role_options,
-                "role_options_json": json.dumps(role_options),
-            }
-        )
-    return TemplateResponse(request, template=[tpl_specific, tpl_fallback], context=ctx)
+
+    return TemplateResponse(
+        request,
+        template=[tpl_specific, tpl_fallback],
+        context=ctx,
+    )
+
 
 # ---------- Roles (UI) ----------
+def _is_admin_strict(u):
+    return (
+        u.is_authenticated
+        and (
+            u.is_superuser
+            or u.is_staff
+            or u.groups.filter(name="admin").exists()
+        )
+    )
+
 
 def _is_admin_or_tech(u):
     return u.is_superuser or u.groups.filter(name__in=["admin", "tecnico"]).exists()
+
 
 @login_required
 @user_passes_test(_is_admin_or_tech)
@@ -969,6 +992,35 @@ def apply_ticket_filters(qs, request):
         qs = qs.filter(priority=priority)
     if asset:
         qs = qs.filter(asset_id=asset)
+    return qs
+
+
+
+def _reports_base_queryset(request):
+    """
+    QS base para los reportes HTML, respetando visibilidad y filtros.
+    Usa apply_ticket_filters para rango de fechas, categoría, prioridad, assignee, asset.
+    Además aplica filtros de estado y texto (q).
+    """
+    qs = Ticket.objects.select_related("category", "assigned_to", "requester")
+
+    # Visibilidad según rol (igual que otros endpoints)
+    if not _is_admin_or_tech(request.user):
+        qs = qs.filter(Q(requester=request.user) | Q(assigned_to=request.user))
+
+    # Filtros comunes (from/to, category, assignee, priority, asset)
+    qs = apply_ticket_filters(qs, request)
+
+    # Filtro de estado (state)
+    state = (request.GET.get("state") or "").strip()
+    if state:
+        qs = qs.filter(state=state)
+
+    # Búsqueda por texto en título / descripción
+    q = (request.GET.get("q") or "").strip()
+    if q:
+        qs = qs.filter(Q(title__icontains=q) | Q(description__icontains=q))
+
     return qs
 
 # --- ENDPOINT: /api/metrics/summary ---
@@ -1303,6 +1355,101 @@ def metrics_page(request):
     )
 
 
+@login_required
+def reports_page(request):
+    """
+    Página HTML de reportes: filtros + gráficos + tabla.
+    Solo admin/tecnico ven todos.
+    """
+    if not _is_admin_or_tech(request.user):
+        return HttpResponseForbidden("No autorizado")
+
+    assignees = (
+        Ticket.objects.exclude(assigned_to=None)
+        .values_list("assigned_to__id", "assigned_to__username")
+        .distinct()
+        .order_by("assigned_to__username")
+    )
+
+    ctx = {
+        "states": REPORT_STATE_CHOICES,
+        "assignees": assignees,
+    }
+    return _render(request, "tickets/reports.html", ctx)
+
+@login_required
+@require_GET
+def reports_data(request):
+    if not _is_admin_or_tech(request.user):
+        return HttpResponseForbidden("No autorizado")
+
+    qs = _reports_base_queryset(request).order_by("-created_at")
+
+    # Conteo por estado
+    by_state = Counter(qs.values_list("state", flat=True))
+
+    # Serie por mes
+    by_month = defaultdict(int)
+    for dt in qs.values_list("created_at", flat=True):
+        key = dt.strftime("%Y-%m")
+        by_month[key] += 1
+
+    # Tabla (limitamos para no enviar miles de filas)
+    rows = []
+    for t in qs.select_related("assigned_to")[:300]:
+        rows.append(
+            {
+                "id": t.id,
+                "title": t.title or "",
+                "state": t.state or "",
+                "assigned": getattr(t.assigned_to, "username", "") or "",
+                "created_at": t.created_at.strftime("%Y-%m-%d %H:%M"),
+            }
+        )
+
+    return JsonResponse(
+        {
+            "by_state": by_state,
+            "by_month": dict(sorted(by_month.items())),
+            "rows": rows,
+            "total": qs.count(),
+        }
+    )
+
+@login_required
+def reports_export_csv(request):
+    if not _is_admin_or_tech(request.user):
+        return HttpResponseForbidden("No autorizado")
+
+    qs = _reports_base_queryset(request).order_by("-created_at")
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        ["ID", "Título", "Estado", "Asignado a", "Categoría", "Creado", "Actualizado"]
+    )
+
+    for t in qs.select_related("category", "assigned_to"):
+        writer.writerow(
+            [
+                t.id,
+                t.title or "",
+                t.state or "",
+                getattr(t.assigned_to, "username", "") or "",
+                getattr(t.category, "name", "") or "",
+                t.created_at.strftime("%Y-%m-%d %H:%M"),
+                t.updated_at.strftime("%Y-%m-%d %H:%M") if t.updated_at else "",
+            ]
+        )
+
+    resp = HttpResponse(
+        buffer.getvalue().encode("utf-8-sig"),
+        content_type="text/csv; charset=utf-8",
+    )
+    resp["Content-Disposition"] = 'attachment; filename="tickets_report.csv"'
+    return resp
+
+
 def faq_page(request):
     query = (request.GET.get("q") or "").strip()
     category_param = (request.GET.get("category") or "").strip()
@@ -1426,3 +1573,246 @@ def metrics_summary(request):
     service = TicketMetricsService(qs)
     summary = service.summarize()
     return Response(summary)
+
+@login_required
+def sistema_page(request):
+    """
+    Menú principal de herramientas de sistema (solo admin).
+    """
+    if not _is_admin_strict(request.user):
+        return HttpResponseForbidden("No autorizado")
+
+    User = get_user_model()
+    admins_count = User.objects.filter(groups__name="admin").distinct().count()
+    techs_count = User.objects.filter(groups__name="tecnico").distinct().count()
+    users_count = User.objects.filter(groups__name="usuario").distinct().count()
+
+    ctx = {
+        "admins_count": admins_count,
+        "techs_count": techs_count,
+        "users_count": users_count,
+    }
+    return _render(request, "tickets/sistema_index.html", ctx)
+
+
+@login_required
+def sistema_logs_export(request):
+    """
+    Exporta logs críticos (TicketLog) a CSV respetando filtros de user y order.
+    No aplica límite (exporta todos los que matchean).
+    """
+    if not _is_admin_strict(request.user):
+        return HttpResponseForbidden("No autorizado")
+
+    qs, meta = _filtered_critical_logs(request, apply_limit=False)
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["Fecha", "Usuario", "Email", "Acción", "Detalle"])
+
+    for log in qs:
+        created = timezone.localtime(log.created_at).strftime("%Y-%m-%d %H:%M")
+        username = log.user.username if log.user else ""
+        email = log.user.email if (log.user and log.user.email) else ""
+        detail = ""
+        if log.meta_json:
+            try:
+                detail = json.dumps(log.meta_json, ensure_ascii=False)
+            except TypeError:
+                detail = str(log.meta_json)
+
+        writer.writerow([created, username, email, log.action, detail])
+
+    resp = HttpResponse(
+        buffer.getvalue().encode("utf-8-sig"),
+        content_type="text/csv; charset=utf-8",
+    )
+    resp["Content-Disposition"] = 'attachment; filename="logs_sistema.csv"'
+    return resp
+
+
+
+
+
+def _filtered_critical_logs(request, apply_limit=True):
+    """
+    Aplica filtros de usuario, orden y límite sobre TicketLog.is_critical=True.
+    Devuelve (queryset o lista, meta_dict).
+    """
+    # límite: 20 / 50 / 100 (por defecto 20)
+    raw_limit = request.GET.get("limit") or "20"
+    try:
+        limit = int(raw_limit)
+    except ValueError:
+        limit = 20
+    if limit not in (20, 50, 100):
+        limit = 20
+
+    # filtro por usuario (username o email)
+    user_q = (request.GET.get("user") or "").strip()
+
+    # orden: 'desc' (default) o 'asc'
+    order = (request.GET.get("order") or "desc").lower()
+    if order not in ("asc", "desc"):
+        order = "desc"
+
+    qs = TicketLog.objects.select_related("user").filter(is_critical=True)
+
+    if user_q:
+        qs = qs.filter(
+            Q(user__username__icontains=user_q) |
+            Q(user__email__icontains=user_q)
+        )
+
+    if order == "asc":
+        qs = qs.order_by("created_at")
+    else:
+        qs = qs.order_by("-created_at")
+
+    if apply_limit:
+        qs = qs[:limit]
+
+    meta = {
+        "limit": limit,
+        "user_q": user_q,
+        "order": order,
+    }
+    return qs, meta
+
+
+@login_required
+def sistema_user_activity(request):
+    if not _is_admin_strict(request.user):
+        return HttpResponseForbidden("No autorizado")
+
+    User = get_user_model()
+    q = (request.GET.get("q") or "").strip()
+    role = (request.GET.get("role") or "").strip()
+
+    users = User.objects.all().prefetch_related("groups").order_by("-last_login", "username")
+
+    if q:
+        users = users.filter(
+            Q(username__icontains=q) |
+            Q(email__icontains=q) |
+            Q(first_name__icontains=q) |
+            Q(last_name__icontains=q)
+        )
+
+    if role in ("admin", "tecnico", "usuario"):
+        users = users.filter(groups__name=role).distinct()
+
+    ctx = {
+        "users": users,
+        "q": q,
+        "role": role,
+    }
+    return _render(request, "tickets/sistema_user_activity.html", ctx)
+
+
+@login_required
+@require_POST
+def sistema_user_toggle_active(request, user_id: int):
+    if not _is_admin_strict(request.user):
+        return HttpResponseForbidden("No autorizado")
+
+    User = get_user_model()
+    target = get_object_or_404(User, pk=user_id)
+
+    # evita que el admin se desactive a sí mismo
+    if target.pk == request.user.pk:
+        messages.error(request, "No puedes desactivar tu propio usuario.")
+        return redirect("sistema_user_activity")
+
+    target.is_active = not target.is_active
+    target.save(update_fields=["is_active"])
+
+    state = "activado" if target.is_active else "desactivado"
+    messages.success(request, f"Usuario {target.username} ha sido {state}.")
+
+    return redirect("sistema_user_activity")
+
+@login_required
+def sistema_auth_failed(request):
+    if not _is_admin_strict(request.user):
+        return HttpResponseForbidden("No autorizado")
+
+    user_q = (request.GET.get("user") or "").strip()
+    order = (request.GET.get("order") or "desc").lower()
+    if order not in ("asc", "desc"):
+        order = "desc"
+
+    raw_limit = request.GET.get("limit") or "20"
+    try:
+        limit = int(raw_limit)
+    except ValueError:
+        limit = 20
+    if limit not in (20, 50, 100):
+        limit = 20
+
+    logs = TicketLog.objects.select_related("user").filter(action="auth.failed")
+
+    if user_q:
+        logs = logs.filter(
+            Q(meta_json__username__icontains=user_q) |
+            Q(user__username__icontains=user_q) |
+            Q(user__email__icontains=user_q)
+        )
+
+    logs = logs.order_by("created_at" if order == "asc" else "-created_at")[:limit]
+
+    ctx = {
+        "logs": logs,
+        "user_q": user_q,
+        "order": order,
+        "limit": limit,
+    }
+    return _render(request, "tickets/sistema_auth_failed.html", ctx)
+
+@login_required
+def sistema_ticket_maintenance(request):
+    if not _is_admin_strict(request.user):
+        return HttpResponseForbidden("No autorizado")
+
+    cutoff = now() - timedelta(days=60)
+
+    tickets_no_category = Ticket.objects.filter(category__isnull=True).order_by("-created_at")[:100]
+    tickets_inprogress_no_assignee = Ticket.objects.filter(
+        state="in_progress", assigned_to__isnull=True
+    ).order_by("-created_at")[:100]
+    tickets_stale = Ticket.objects.filter(
+        state__in=["open", "in_progress"],
+        created_at__lt=cutoff,
+    ).order_by("-created_at")[:100]
+
+    ctx = {
+        "tickets_no_category": tickets_no_category,
+        "tickets_inprogress_no_assignee": tickets_inprogress_no_assignee,
+        "tickets_stale": tickets_stale,
+        "cutoff": cutoff,
+    }
+    return _render(request, "tickets/sistema_ticket_maintenance.html", ctx)
+
+@login_required
+def sistema_health(request):
+    if not _is_admin_strict(request.user):
+        return HttpResponseForbidden("No autorizado")
+
+    db_ok = True
+    db_error = None
+    try:
+        Ticket.objects.exists()
+    except Exception as exc:
+        db_ok = False
+        db_error = str(exc)
+
+    ctx = {
+        "python_version": sys.version.split()[0],
+        "django_version": django.get_version(),
+        "debug": settings.DEBUG,
+        "timezone": str(get_current_timezone()),
+        "db_ok": db_ok,
+        "db_error": db_error,
+        "email_backend": getattr(settings, "EMAIL_BACKEND", "No configurado"),
+    }
+    return _render(request, "tickets/sistema_health.html", ctx)

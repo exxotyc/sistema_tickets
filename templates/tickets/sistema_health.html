@@ -1,0 +1,62 @@
+{% extends "tickets/base.html" %}
+
+{% block title %}Sistema · Health{% endblock %}
+
+{% block content %}
+<h1 class="h4 mb-3">
+  <i class="bi bi-heart-pulse me-2"></i>Health del sistema
+</h1>
+
+<div class="row g-3">
+  <div class="col-md-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <h2 class="h6 mb-3">Entorno</h2>
+        <dl class="row mb-0 small">
+          <dt class="col-5">Python</dt>
+          <dd class="col-7">{{ python_version }}</dd>
+
+          <dt class="col-5">Django</dt>
+          <dd class="col-7">{{ django_version }}</dd>
+
+          <dt class="col-5">DEBUG</dt>
+          <dd class="col-7">
+            {% if debug %}
+              <span class="badge text-bg-warning">ON</span>
+            {% else %}
+              <span class="badge text-bg-success">OFF</span>
+            {% endif %}
+          </dd>
+
+          <dt class="col-5">Timezone</dt>
+          <dd class="col-7">{{ timezone }}</dd>
+
+          <dt class="col-5">Email backend</dt>
+          <dd class="col-7"><code>{{ email_backend }}</code></dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <h2 class="h6 mb-3">Base de datos</h2>
+        {% if db_ok %}
+          <p class="text-success mb-1">
+            <i class="bi bi-check-circle me-1"></i>Conexión OK.
+          </p>
+          <p class="text-muted small mb-0">
+            Se pudo ejecutar una consulta simple sobre <code>Ticket</code>.
+          </p>
+        {% else %}
+          <p class="text-danger mb-1">
+            <i class="bi bi-x-circle me-1"></i>Error al consultar la base de datos.
+          </p>
+          <pre class="small text-muted mb-0">{{ db_error }}</pre>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
