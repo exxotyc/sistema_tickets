@@ -1,71 +1,100 @@
 import logging
 from datetime import timedelta
 from django.db import models
-from django.contrib.auth.models import User
-from django.utils.timezone import now
-from django.db import models
 from django.contrib.auth.models import User, Group
+from django.utils.timezone import now
 
-from .services.sla import calculate_sla_status  # 👈 import del módulo SLA
-
-
-
-PRIORITY_CHOICES = [
-    ("low","Baja"),
-    ("medium","Media"),
-    ("high","Alta"),
-    ("critical","Crítica"),
-]
-
-STATE_CHOICES = [
-    ("open","Abierto"),
-    ("in_progress","En progreso"),
-    ("resolved","Resuelto"),
-    ("closed","Cerrado"),
-]
+from .services.sla import calculate_sla_status
 
 
+# ==========================
+#   CATEGORY
+# ==========================
 class Category(models.Model):
     name = models.CharField(max_length=50, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
-from datetime import timedelta
-from django.db import models
-from django.contrib.auth.models import User
-from django.utils.timezone import now
-import logging
-
-from .services.sla import calculate_sla_status  # 👈 import del módulo SLA
+    def __str__(self):
+        return self.name
 
 
+# ==========================
+#   PRIORITY  (NUEVA)
+# ==========================
+class Priority(models.Model):
+    code = models.SlugField(max_length=20, unique=True)   # low, medium, high, critical
+    name = models.CharField(max_length=50, unique=True)
+    sla_minutes = models.PositiveIntegerField(default=60)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["sla_minutes"]
+
+    def __str__(self):
+        return f"{self.name} ({self.code})"
+
+
+# ==========================
+#   TICKET
+# ==========================
 class Ticket(models.Model):
     title = models.CharField(max_length=200)
     description = models.TextField()
-    requester = models.ForeignKey(User, related_name="tickets", on_delete=models.CASCADE)
-    assigned_to = models.ForeignKey(User, related_name="assigned_tickets", null=True, blank=True, on_delete=models.SET_NULL)
-    category = models.ForeignKey("Category", null=True, blank=True, on_delete=models.SET_NULL)
+
+    requester = models.ForeignKey(
+        User, related_name="tickets", on_delete=models.CASCADE
+    )
+    assigned_to = models.ForeignKey(
+        User, related_name="assigned_tickets",
+        null=True, blank=True, on_delete=models.SET_NULL
+    )
+    category = models.ForeignKey(
+        Category, null=True, blank=True, on_delete=models.SET_NULL
+    )
+
     asset_id = models.CharField(max_length=120, null=True, blank=True, db_index=True)
-    priority = models.CharField(max_length=20, choices=[
-        ("low", "Baja"),
-        ("medium", "Media"),
-        ("high", "Alta"),
-    ], default="medium")
-    state = models.CharField(max_length=20, choices=[
-        ("open", "Abierto"),
-        ("in_progress", "En progreso"),
-        ("resolved", "Resuelto"),
-        ("closed", "Cerrado"),
-    ], default="open")
+
+    # ================================
+    #     PRIORIDAD — FOREIGN KEY
+    # ================================
+    priority = models.ForeignKey(
+        "Priority",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="tickets"
+    )
+
+    # (el resto de tus campos va debajo si existen)
+
+    state = models.CharField(
+        max_length=20,
+        choices=[
+            ("open", "Abierto"),
+            ("in_progress", "En progreso"),
+            ("resolved", "Resuelto"),
+            ("closed", "Cerrado"),
+        ],
+        default="open"
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    attachment = models.FileField(upload_to="attachments/%Y/%m/", null=True, blank=True)
+
+    # adjuntos
+    attachment = models.FileField(
+        upload_to="attachments/%Y/%m/", null=True, blank=True
+    )
+
+    # SLA
     frt_due_at = models.DateTimeField(null=True, blank=True)
     resolve_due_at = models.DateTimeField(null=True, blank=True)
     sla_minutes = models.PositiveIntegerField(null=True, blank=True)
     due_at = models.DateTimeField(null=True, blank=True)
     breach_risk = models.BooleanField(default=False)
 
-    # --- Control de transición de estados ---
+    # ---- Control transición de estados ----
     STATE_TRANSITIONS = {
         "open": {"in_progress"},
         "in_progress": {"open", "resolved"},
@@ -85,7 +114,6 @@ class Ticket(models.Model):
         return new_state in self.STATE_TRANSITIONS.get(self.state, set())
 
     def change_state(self, new_state, *, by=None, force=False):
-        """Modifica el estado validando la transición y agendando el log."""
         if new_state == self.state:
             return False
 
@@ -103,7 +131,11 @@ class Ticket(models.Model):
 
     def save(self, *args, **kwargs):
         previous_state = None
-        has_context = hasattr(self, "_state_change_context") and self._state_change_context
+        has_context = (
+            hasattr(self, "_state_change_context")
+            and self._state_change_context
+        )
+
         if self.pk and not has_context:
             previous_state = (
                 Ticket.objects.filter(pk=self.pk)
@@ -115,6 +147,7 @@ class Ticket(models.Model):
 
         context = getattr(self, "_state_change_context", None)
         state_from = state_to = None
+
         if context:
             state_from = context.get("from")
             state_to = context.get("to")
@@ -123,7 +156,7 @@ class Ticket(models.Model):
             state_to = self.state
 
         if state_from is not None and state_from != state_to:
-            from .models import TicketLog  # Evita import circular
+            from .models import TicketLog  # evita import circular
 
             TicketLog.objects.create(
                 ticket=self,
@@ -131,6 +164,7 @@ class Ticket(models.Model):
                 action="state_change",
                 meta_json={"from": state_from, "to": state_to},
             )
+
             try:
                 from .notifications import notify_ticket_state_change
                 notify_ticket_state_change(
@@ -144,7 +178,7 @@ class Ticket(models.Model):
                     "Fallo al enviar notificación de cambio de estado"
                 )
 
-        # 🔁 Actualiza estado SLA automáticamente en cada guardado
+        # SLA update
         try:
             self.update_sla_status()
         except Exception:
@@ -155,42 +189,39 @@ class Ticket(models.Model):
         if hasattr(self, "_state_change_context"):
             self._state_change_context = None
 
-    # --- 🔒 Evaluación SLA ---
+    # --- SLA ---
     def update_sla_status(self):
-        """
-        Calcula si el ticket está en riesgo de incumplir su SLA.
-        Se basa en la prioridad y tiempo transcurrido desde su creación.
-        """
         sla = calculate_sla_status(self)
-        # Evitar recursión: actualizamos directamente sin disparar save()
         type(self).objects.filter(pk=self.pk).update(breach_risk=sla["breach_risk"])
         self.breach_risk = sla["breach_risk"]
         return sla
 
     def get_sla_label(self):
-        """
-        Retorna una etiqueta legible para el estado SLA (para templates).
-        """
-        from .services.sla import calculate_sla_status
         data = calculate_sla_status(self)
-
         if data["breached"]:
             return ("Vencido", "danger", "🔴")
         elif data["nearing_breach"]:
             return ("En riesgo", "warning", "🟡")
-        else:
-            return ("En tiempo", "success", "🟢")
+        return ("En tiempo", "success", "🟢")
 
     def __str__(self):
         return f"#{self.id} {self.title}"
 
 
-
+# ==========================
+#   TICKET LOG
+# ==========================
 class TicketLog(models.Model):
-    ticket = models.ForeignKey(Ticket, related_name="logs", null=True, blank=True, on_delete=models.CASCADE)
-    user = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
+    ticket = models.ForeignKey(
+        Ticket, related_name="logs",
+        null=True, blank=True, on_delete=models.CASCADE
+    )
+    user = models.ForeignKey(
+        User, null=True, blank=True,
+        on_delete=models.SET_NULL
+    )
     action = models.CharField(max_length=200)
-    meta_json = models.JSONField(default=dict, blank=True)   # <- DEBE existir
+    meta_json = models.JSONField(default=dict, blank=True)
     is_critical = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -206,8 +237,13 @@ class TicketLog(models.Model):
         return self.ACTION_LABELS.get(self.action, self.action)
 
 
+# ==========================
+#   FAQ
+# ==========================
 class FAQ(models.Model):
-    category = models.ForeignKey(Category, related_name="faqs", on_delete=models.CASCADE)
+    category = models.ForeignKey(
+        Category, related_name="faqs", on_delete=models.CASCADE
+    )
     question = models.CharField(max_length=255)
     answer = models.TextField()
     is_active = models.BooleanField(default=True)
@@ -226,35 +262,52 @@ class FAQFeedback(models.Model):
     faq = models.ForeignKey(FAQ, related_name="feedback", on_delete=models.CASCADE)
     user = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
     comment = models.TextField(blank=True)
+    is_useful = models.BooleanField(default=False)
+    resolved = models.BooleanField(default=False)  # IMPORTANTE
     created_at = models.DateTimeField(auto_now_add=True)
 
-    class Meta:
-        ordering = ["-created_at"]
 
-
+# ==========================
+#   COMMENT
+# ==========================
 class Comment(models.Model):
-    ticket = models.ForeignKey(Ticket, related_name="comments", on_delete=models.CASCADE)
+    ticket = models.ForeignKey(
+        Ticket, related_name="comments", on_delete=models.CASCADE
+    )
     user = models.ForeignKey(User, on_delete=models.PROTECT)
     body = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
-    def __str__(self): return f"Comment {self.id} on Ticket {self.ticket_id}"
 
+    def __str__(self):
+        return f"Comment {self.id} on Ticket {self.ticket_id}"
+
+
+# ==========================
+#   ATTACHMENT
+# ==========================
 class Attachment(models.Model):
-    ticket = models.ForeignKey(Ticket, related_name="attachments", on_delete=models.CASCADE)
+    ticket = models.ForeignKey(
+        Ticket, related_name="attachments", on_delete=models.CASCADE
+    )
     user = models.ForeignKey(User, on_delete=models.PROTECT)
     file = models.FileField(upload_to="attachments/%Y/%m/")
     mime = models.CharField(max_length=100, blank=True)
     size_bytes = models.BigIntegerField(null=True, blank=True)
     sha256 = models.CharField(max_length=64, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
-    def __str__(self): return f"Attachment {self.id} for Ticket {self.ticket_id}"
+
+    def __str__(self):
+        return f"Attachment {self.id} for Ticket {self.ticket_id}"
 
 
+# ==========================
+#   SECTION
+# ==========================
 class Section(models.Model):
-    code = models.SlugField(unique=True)                 # p.ej. "categorias", "usuarios"
-    title = models.CharField(max_length=80)              # Título visible
-    url_name = models.CharField(max_length=80)           # nombre de URL a resolver
-    groups = models.ManyToManyField(Group, blank=True)   # quiénes la ven
+    code = models.SlugField(unique=True)
+    title = models.CharField(max_length=80)
+    url_name = models.CharField(max_length=80)
+    groups = models.ManyToManyField(Group, blank=True)
     is_active = models.BooleanField(default=True)
 
     class Meta:
@@ -262,5 +315,5 @@ class Section(models.Model):
 
     def __str__(self):
         return self.title
-    
+
 

@@ -40,6 +40,10 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = "config.urls"
 
+
+# ===============================
+#   TEMPLATES
+# ===============================
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
@@ -51,7 +55,10 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+
+                # LOS ÚNICOS DOS CONTEXT PROCESSORS QUE EXISTÍAN
                 "tickets.role_flags.role_flags",
+                "tickets.context.maint_sections",
             ],
         },
     }
@@ -59,6 +66,10 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
+
+# ===============================
+#   DATABASE
+# ===============================
 DATABASES = {
     "default": {
         "ENGINE": os.getenv("DB_ENGINE", "django.db.backends.sqlite3"),
@@ -70,6 +81,10 @@ DATABASES = {
     }
 }
 
+
+# ===============================
+#   AUTH
+# ===============================
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
@@ -77,25 +92,37 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
-# Autenticación y redirecciones por nombre de URL
 LOGIN_URL = "/auth/login/"
 LOGIN_REDIRECT_URL = "dashboard"
 LOGOUT_REDIRECT_URL = "/"
+
 
 LANGUAGE_CODE = "es-cl"
 TIME_ZONE = "America/Santiago"
 USE_I18N = True
 USE_TZ = True
 
+
+# ===============================
+#   STATIC / MEDIA
+# ===============================
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-# CORS
+
+# ===============================
+#   CORS
+# ===============================
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = False
 
+
+# ===============================
+#   DRF / JWT
+# ===============================
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
@@ -124,13 +151,18 @@ SIMPLE_JWT = {
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
+
 SWAGGER_SETTINGS = {
     "USE_SESSION_AUTH": False,
     "SECURITY_DEFINITIONS": {
-        "Bearer": {"type": "apiKey", "name": "Authorization", "in": "header"}
+        "Bearer": {"type": "apiKey", "name": "Authorization", "in": "header"},
     },
 }
 
+
+# ===============================
+#   LIMITES DE ARCHIVOS
+# ===============================
 DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
 
@@ -139,28 +171,41 @@ CSRF_TRUSTED_ORIGINS = [
     "http://127.0.0.1",
 ]
 
-TEMPLATES[0]["OPTIONS"]["context_processors"] += [
-    "tickets.context.maint_sections",
-]
 
+# ===============================
+#   SLA
+# ===============================
 SLA_MATRIX = {
     "low":      {"frt_min": 240, "res_h": 72},
     "medium":   {"frt_min": 120, "res_h": 48},
     "high":     {"frt_min": 60,  "res_h": 24},
     "critical": {"frt_min": 30,  "res_h": 8},
 }
-SLA_AT_RISK_MARGIN = 0.2  # 20% del tiempo restante
 
+SLA_AT_RISK_MARGIN = 0.2
+
+
+# ===============================
+#   NOTIFICACIONES
+# ===============================
 TICKET_NOTIFICATIONS = {
     "emails": [addr for addr in os.getenv("TICKET_NOTIFICATION_EMAILS", "").split(",") if addr],
     "webhook_url": os.getenv("TICKET_NOTIFICATION_WEBHOOK", ""),
     "dedup_seconds": int(os.getenv("TICKET_NOTIFICATION_DEDUP_SECONDS", "300") or 0),
 }
 
-CRONJOBS = list(locals().get("CRONJOBS", []))
-CRONJOBS.append(("*/30 * * * *", "django.core.management.call_command", ["recalculate_sla"]))
+
+# ===============================
+#   CRON
+# ===============================
+CRONJOBS = [
+    ("*/30 * * * *", "django.core.management.call_command", ["recalculate_sla"]),
+]
 
 
+# ===============================
+#   LOGGING
+# ===============================
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -176,17 +221,8 @@ LOGGING = {
         }
     },
     "loggers": {
-        "tickets.access": {
-            "handlers": ["console"],
-            "level": "INFO",
-        },
-        "tickets.notifications": {
-            "handlers": ["console"],
-            "level": "INFO",
-        },
-        "tickets.security": {
-            "handlers": ["console"],
-            "level": "WARNING",
-        },
+        "tickets.access": {"handlers": ["console"], "level": "INFO"},
+        "tickets.notifications": {"handlers": ["console"], "level": "INFO"},
+        "tickets.security": {"handlers": ["console"], "level": "WARNING"},
     },
 }

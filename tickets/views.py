@@ -71,6 +71,7 @@ from .models import (
     Section,
     FAQ,
     FAQFeedback,
+    Priority,
 )
 from .permissions import IsTicketActorOrAdmin
 from .serializers import (
@@ -82,6 +83,7 @@ from .serializers import (
     FAQSerializer,
     UserAdminSerializer,
     UserSummarySerializer,
+    PrioritySerializer,
 )
 from .reports import build_report_rows, filters_footer
 from .services.assets import build_asset_history
@@ -159,6 +161,7 @@ class CategoryViewSet(viewsets.ModelViewSet):
     serializer_class = CategorySerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
+# tickets/views.py
 
 class FAQViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     queryset = FAQ.objects.filter(is_active=True).select_related("category").order_by("question")
@@ -168,76 +171,136 @@ class FAQViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     filterset_fields = ["category"]
     search_fields = ["question", "answer"]
 
-    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticatedOrReadOnly])
+    # ========================================
+    #   Registrar voto "Útil"
+    # ========================================
+    @action(detail=True, methods=["post"], permission_classes=[permissions.AllowAny])
+    def useful(self, request, pk=None):
+        faq = self.get_object()
+        user = request.user if request.user.is_authenticated else None
+
+        fb = FAQFeedback.objects.create(
+            faq=faq,
+            user=user,
+            is_useful=True,
+            resolved=True,
+            comment="",
+        )
+
+        return Response({"status": "ok", "feedback_id": fb.id})
+
+    # ========================================
+    #   Registrar voto "No útil"
+    # ========================================
+    @action(detail=True, methods=["post"], permission_classes=[permissions.AllowAny])
     def unresolved(self, request, pk=None):
         faq = self.get_object()
         comment = (request.data.get("comment") or "").strip()
         user = request.user if request.user.is_authenticated else None
-        feedback = _record_faq_unresolved(faq, user, comment)
-        return Response({"status": "recorded", "feedback_id": feedback.pk})
+
+        fb = FAQFeedback.objects.create(
+            faq=faq,
+            user=user,
+            is_useful=False,
+            resolved=False,
+            comment=comment,
+        )
+
+        return Response({"status": "ok", "feedback_id": fb.id})
 
 
+# ================================
+#   TICKET VIEWSET CORREGIDO
+# ================================
 class TicketViewSet(viewsets.ModelViewSet):
     """
-    ViewSet principal para gestionar Tickets.
-    Controla visibilidad y permisos según rol:
+    ViewSet para gestionar Tickets:
     - admin: ve y edita todos
-    - técnico: solo sus tickets asignados, puede cambiar estado o asignarse
+    - técnico: ve sus propios asignados
     - usuario: solo sus propios tickets
     """
     serializer_class = TicketSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
+
     filter_backends = [filters.SearchFilter, filters.OrderingFilter, DjangoFilterBackend]
     search_fields = ["title", "description"]
     ordering_fields = ["created_at", "updated_at", "priority"]
     filterset_fields = ["state", "priority", "category", "asset_id"]
 
+    # ------------------------------------------------------
+    # QUERYSET según rol
+    # ------------------------------------------------------
     def get_queryset(self):
         user = self.request.user
-        qs = Ticket.objects.select_related("requester", "assigned_to", "category").order_by("-created_at")
+
+        qs = Ticket.objects.select_related(
+            "requester",
+            "assigned_to",
+            "category",
+            "priority"
+        ).order_by("-created_at")
 
         if user.groups.filter(name="admin").exists():
             return qs
-        elif user.groups.filter(name="tecnico").exists():
-            return qs.filter(assigned_to=user)
-        else:
-            return qs.filter(requester=user)
 
+        if user.groups.filter(name="tecnico").exists():
+            return qs.filter(assigned_to=user)
+
+        return qs.filter(requester=user)
+
+    # ------------------------------------------------------
+    # CREAR TICKET
+    # ------------------------------------------------------
     def perform_create(self, serializer):
         user = self.request.user
         if not user.is_authenticated:
             raise PermissionDenied("Debes iniciar sesión para crear tickets.")
-        obj = serializer.save(requester=user)
-        return obj
+        return serializer.save(requester=user)
 
+    # ------------------------------------------------------
+    # ACTUALIZAR TICKET (corregido prioridad FK)
+    # ------------------------------------------------------
     def perform_update(self, serializer):
-        """Permite que el técnico cambie estado de sus tickets."""
         instance = self.get_object()
         user = self.request.user
 
         is_admin = user.groups.filter(name="admin").exists()
         is_tech = user.groups.filter(name="tecnico").exists()
 
-        # Técnicos solo pueden modificar sus propios tickets asignados
-        if is_tech and instance.assigned_to != user:
-            raise PermissionDenied("No puedes modificar tickets que no te fueron asignados.")
-
-        # Solicitantes no pueden editar nada
+        # Solicitantes NO editan
         if not (is_admin or is_tech):
             raise PermissionDenied("No tienes permiso para editar este ticket.")
 
+        # Técnicos solo editan si están asignados
+        if is_tech and instance.assigned_to != user:
+            raise PermissionDenied("No puedes modificar tickets que no te fueron asignados.")
+
+        validated = serializer.validated_data
+
+        # PRIORIDAD — siempre FK correcta
+        if "priority" in validated:
+            instance.priority = validated["priority"]
+
+        # CATEGORY — también FK
+        if "category" in validated:
+            instance.category = validated["category"]
+
         serializer.save()
 
+    # ------------------------------------------------------
+    # ASIGNAR TICKET
+    # ------------------------------------------------------
     @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
     def assign(self, request, pk=None):
         """
-        Permite reasignar tickets.
-        - Admin puede asignar a cualquiera.
-        - Técnico solo puede asignarse a sí mismo.
+        Reasigna tickets:
+        - Admin puede asignar a cualquiera
+        - Técnico solo puede asignarse a sí mismo o tickets libres
         """
         user = request.user
         ticket = self.get_object()
+
         is_admin = user.groups.filter(name="admin").exists()
         is_tech = user.groups.filter(name="tecnico").exists()
 
@@ -248,26 +311,28 @@ class TicketViewSet(viewsets.ModelViewSet):
         if not user_id:
             return Response({"error": "user_id requerido"}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Obtener usuario destino
         try:
             target_user = get_user_model().objects.get(pk=user_id)
         except get_user_model().DoesNotExist:
             return Response({"error": "Usuario no encontrado"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Si es técnico, solo puede asignarse a sí mismo, o a un ticket sin asignar
+        # Restricción técnicos
         if is_tech and target_user != user:
             if ticket.assigned_to and ticket.assigned_to != user:
                 return Response(
-                    {"error": "No puedes asignar tickets que ya están asignados a otros."},
-                    status=status.HTTP_403_FORBIDDEN,
+                    {"error": "No puedes asignar tickets ya asignados a otros."},
+                    status=status.HTTP_403_FORBIDDEN
                 )
 
         previous = ticket.assigned_to
         ticket.assigned_to = target_user
         ticket.save(update_fields=["assigned_to"])
 
+        # Registrar log
         TicketLog.objects.create(
             ticket=ticket,
-            user=request.user,
+            user=user,
             action="reassigned",
             meta_json={
                 "from": previous.id if previous else None,
@@ -462,11 +527,20 @@ def session_token(request):
 
 @login_required
 def ticket_new(request):
+
+    # ====================================================
+    # 1) Capturar texto proveniente de FAQ (?fromfaq=...)
+    # ====================================================
+    from_faq = request.GET.get("fromfaq", "").strip()
+
     # 🚫 Bloquear acceso a técnicos
     if request.user.groups.filter(name="tecnico").exists():
         messages.error(request, "No tienes permiso para crear tickets.")
         return redirect("ticket_list")
 
+    # ====================================================
+    # 2) Procesar POST (crear ticket)
+    # ====================================================
     if request.method == "POST":
         title = request.POST.get("title", "").strip()
         description = request.POST.get("description", "").strip()
@@ -484,6 +558,7 @@ def ticket_new(request):
                     "is_admin_or_tecnico": request.user.groups.filter(
                         name__in=["admin", "tecnico"]
                     ).exists(),
+                    "from_faq": from_faq,   # 👈 volver a enviarlo al template
                 },
             )
 
@@ -503,7 +578,11 @@ def ticket_new(request):
         messages.success(request, "Ticket creado correctamente.")
         return redirect("ticket_list")
 
+    # ====================================================
+    # 3) GET — Renderizar formulario
+    # ====================================================
     categories = Category.objects.order_by("name")
+
     return render(
         request,
         "tickets/ticket_new.html",
@@ -511,9 +590,11 @@ def ticket_new(request):
             "categories": categories,
             "is_admin_or_tecnico": request.user.groups.filter(
                 name__in=["admin", "tecnico"]
-            ).exists(),  # 👈 pasa esta variable al template
+            ).exists(),
+            "from_faq": from_faq,   # 👈 clave para autorrellenar
         },
     )
+
 
 @login_required
 def dashboard(request):
@@ -709,11 +790,28 @@ def maint_section(request, code: str):
         "maint_sections": _navbar_sections(request.user),
     }
 
+    # ======================================
+    # 🔥 AQUI SE AGREGAN LOS DATOS NUEVOS
+    # ======================================
+
+    # --- Prioridades ---
+    if code == "prioridades":
+        from .models import Priority
+        ctx["priorities"] = Priority.objects.order_by("sla_minutes")
+
+    # --- Categorías (opcional si las manejas igual) ---
+    if code == "categorias":
+        from .models import Category
+        ctx["categories"] = Category.objects.order_by("name")
+
+    # ======================================
+
     return TemplateResponse(
         request,
         template=[tpl_specific, tpl_fallback],
         context=ctx,
     )
+
 
 
 # ---------- Roles (UI) ----------
@@ -1816,3 +1914,119 @@ def sistema_health(request):
         "email_backend": getattr(settings, "EMAIL_BACKEND", "No configurado"),
     }
     return _render(request, "tickets/sistema_health.html", ctx)
+
+
+
+class PriorityViewSet(viewsets.ModelViewSet):
+    queryset = Priority.objects.all().order_by("sla_minutes")
+    serializer_class = PrioritySerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+
+        if user.groups.filter(name="admin").exists():
+            return Priority.objects.all().order_by("sla_minutes")
+
+        if user.groups.filter(name="tecnico").exists():
+            return Priority.objects.filter(is_active=True).order_by("sla_minutes")
+
+        return Priority.objects.none()
+
+
+from django.contrib.auth.decorators import login_required
+from django.template.response import TemplateResponse
+from tickets.models import Priority
+from tickets.context import maint_sections   # ← IMPORT CORRECTO
+
+@login_required
+def maint_prioridades(request):
+
+    priorities = Priority.objects.order_by("sla_minutes")
+
+    ctx = {
+        "priorities": priorities,
+        "maint_sections": maint_sections(request)["maint_sections"],  # ← LA CLAVE
+        "code": "prioridades",
+    }
+
+    return TemplateResponse(request, "tickets/maint_prioridades.html", ctx)
+
+
+# ============================
+#   MANTENEDOR DE FAQ (ADMIN)
+# ============================
+from django.contrib.auth.decorators import login_required
+from django.shortcuts import render
+from .models import FAQ
+
+@login_required
+def maint_faq(request):
+    """
+    Página del mantenedor de FAQ.
+    Solo accesible para administradores.
+    """
+    user = request.user
+
+    # Solo admins
+    if not user.groups.filter(name="admin").exists():
+        return render(request, "tickets/403.html", status=403)
+
+    faqs = FAQ.objects.all().order_by("id")
+
+    ctx = {
+        "faqs": faqs,
+    }
+
+    return render(request, "tickets/maint_faq.html", ctx)
+
+@login_required
+def reportes_faq(request):
+    """
+    Métricas completas:
+    - utiles: feedback.is_useful=True
+    - no_utiles: feedback.is_useful=False
+    - total: todos los feedback
+    - utilidad_pct: porcentaje de feedback útil
+    """
+
+    user = request.user
+    if not user.groups.filter(name__in=["admin", "tecnico"]).exists():
+        return JsonResponse({"error": "No autorizado"}, status=403)
+
+    data = (
+        FAQ.objects.annotate(
+            total_feedback=Count("feedback"),
+            utiles=Count("feedback", filter=Q(feedback__is_useful=True)),
+            no_utiles=Count("feedback", filter=Q(feedback__is_useful=False)),
+        )
+        .values(
+            "id",
+            "question",
+            "category__name",
+            "total_feedback",
+            "utiles",
+            "no_utiles",
+        )
+        .order_by("-no_utiles")
+    )
+
+    # Calculamos % utilidad
+    results = []
+    for f in data:
+        total = f["total_feedback"] or 0
+        utiles = f["utiles"] or 0
+        utilidad_pct = round((utiles / total * 100), 1) if total > 0 else 0
+
+        results.append({
+            "question": f["question"],
+            "category__name": f["category__name"],
+            "total": total,
+            "utiles": utiles,
+            "no_utiles": f["no_utiles"],
+            "utilidad_pct": utilidad_pct,
+        })
+
+    return JsonResponse(results, safe=False)
+
+

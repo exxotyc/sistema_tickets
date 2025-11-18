@@ -1,6 +1,5 @@
 django
 dotenv
-corsheaders
 djangorestframework
 django-cors-headers
 django_filter

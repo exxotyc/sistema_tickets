@@ -1,0 +1,335 @@
+{% extends "tickets/base.html" %}
+{% block title %}Mantenedor · FAQ{% endblock %}
+
+{% block extra_head %}
+<style>
+  .glass{
+    background:rgba(255,255,255,.92);
+    backdrop-filter:blur(6px);
+    border:1px solid rgba(15,23,42,.06);
+    border-radius:1rem;
+  }
+  .fade-in{animation:fadeIn .4s ease}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .table-hover tbody tr:hover{background:#f8fafc}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="glass p-3 p-md-4 fade-in">
+
+  <!-- Header -->
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h5 m-0 d-flex align-items-center gap-2">
+      <i class="bi bi-question-circle-fill text-primary"></i> Preguntas Frecuentes (FAQ)
+    </h1>
+
+    <div class="d-flex gap-2">
+      <button id="btnNew" class="btn btn-primary btn-sm btn-ripple">
+        <i class="bi bi-plus-lg me-1"></i>Nueva FAQ
+      </button>
+      <button id="btnReload" class="btn btn-outline-secondary btn-sm btn-ripple">
+        <i class="bi bi-arrow-clockwise me-1"></i>Recargar
+      </button>
+      <a class="btn btn-outline-secondary btn-sm btn-ripple" href="{% url 'maint_index' %}">
+        Volver
+      </a>
+    </div>
+  </div>
+
+  <!-- Mensaje Global -->
+  <div id="globalMsg" class="alert d-none"></div>
+
+  <!-- Tabla -->
+  <div class="table-responsive">
+    <table class="table table-hover align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>Pregunta</th>
+          <th>Categoría</th>
+          <th>Activa</th>
+          <th class="text-end">Acciones</th>
+        </tr>
+      </thead>
+      <tbody id="rows">
+        <tr><td colspan="4" class="text-center text-muted py-4">Cargando…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<!-- MODAL -->
+<div class="modal fade" id="faqModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+
+      <form id="faqForm">
+        <div class="modal-header">
+          <h5 class="modal-title">Nueva FAQ</h5>
+          <button class="btn-close" type="button" data-bs-dismiss="modal"></button>
+        </div>
+
+        <div class="modal-body">
+          <div id="formAlert" class="alert alert-danger d-none small"></div>
+
+          <div class="mb-3">
+            <label class="form-label">Pregunta</label>
+            <input id="f_question" type="text" class="form-control" required>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">Respuesta</label>
+            <textarea id="f_answer" class="form-control" rows="3" required></textarea>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">Categoría</label>
+            <select id="f_category" class="form-select" required>
+              <option value="">Cargando…</option>
+            </select>
+          </div>
+
+          <div class="form-check form-switch">
+            <input id="f_active" class="form-check-input" type="checkbox" checked>
+            <label class="form-check-label">Activa</label>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn btn-outline-secondary btn-ripple" type="button" data-bs-dismiss="modal">Cancelar</button>
+          <button class="btn btn-primary btn-ripple" type="submit">Guardar</button>
+        </div>
+
+      </form>
+
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ===================================================================================
+// API helpers
+// ===================================================================================
+function authHeader(){
+  const t = localStorage.getItem("access_token");
+  return t ? { Authorization: "Bearer " + t } : {};
+}
+
+async function apiFetch(url, opts = {}){
+  const r = await fetch(url, {
+    ...opts,
+    headers: { ...(opts.headers||{}), ...authHeader() }
+  });
+  return r;
+}
+
+async function sendJSON(url, method, body){
+  const r = await apiFetch(url, {
+    method,
+    headers:{ "Content-Type":"application/json", ...authHeader() },
+    body: JSON.stringify(body)
+  });
+
+  if(!r.ok){
+    let msg = "Error";
+    try{ const j = await r.json(); msg = j.detail || j.error || JSON.stringify(j); }catch{}
+    return { ok:false, error:msg };
+  }
+
+  const data = await r.json().catch(()=>null);
+  return { ok:true, data };
+}
+
+// ===================================================================================
+// MAIN
+// ===================================================================================
+(function(){
+
+  function esc(s){return String(s||"").replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));}
+
+  const rows = document.getElementById("rows");
+  const btnNew = document.getElementById("btnNew");
+  const btnReload = document.getElementById("btnReload");
+  const globalMsg = document.getElementById("globalMsg");
+
+  const modalEl = document.getElementById("faqModal");
+  const modal = new bootstrap.Modal(modalEl);
+  const form = document.getElementById("faqForm");
+  const formAlert = document.getElementById("formAlert");
+
+  const f_question = document.getElementById("f_question");
+  const f_answer = document.getElementById("f_answer");
+  const f_category = document.getElementById("f_category");
+  const f_active = document.getElementById("f_active");
+
+  let currentId = null;
+  let records = [];
+
+  function showGlobal(msg, ok=true){
+    globalMsg.className = "alert " + (ok ? "alert-success" : "alert-danger");
+    globalMsg.textContent = msg;
+    globalMsg.classList.remove("d-none");
+    setTimeout(()=>globalMsg.classList.add("d-none"),2000);
+  }
+
+  function showFormError(msg){
+    formAlert.textContent = msg;
+    formAlert.classList.remove("d-none");
+  }
+  function hideFormError(){
+    formAlert.classList.add("d-none");
+  }
+
+  // ------------------------------------------------------------------
+  // CARGAR CATEGORÍAS
+  // ------------------------------------------------------------------
+  async function loadCategories(){
+    const r = await apiFetch("/api/categories/");
+    const data = await r.json();
+    f_category.innerHTML = "";
+    (data.results || data).forEach(c=>{
+      const o = document.createElement("option");
+      o.value = c.id;
+      o.textContent = c.name;
+      f_category.appendChild(o);
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // CARGAR FAQ
+  // ------------------------------------------------------------------
+  async function load(){
+    rows.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">Cargando…</td></tr>';
+    const r = await apiFetch("/api/faqs/");
+    const data = await r.json();
+    records = data.results || data || [];
+    render();
+  }
+
+  function render(){
+    if(!records.length){
+      rows.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">Sin preguntas registradas</td></tr>';
+      return;
+    }
+
+    rows.innerHTML = "";
+    records.forEach(f=>{
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${esc(f.question)}</td>
+        <td>${esc(f.category_name || "-")}</td>
+        <td>${f.is_active ? '<span class="badge text-bg-success">Sí</span>' : '<span class="badge text-bg-secondary">No</span>'}</td>
+        <td class="text-end">
+          <button class="btn btn-outline-primary btn-sm btn-ripple me-1" data-edit="${f.id}">
+            <i class="bi bi-pencil"></i>
+          </button>
+          <button class="btn btn-outline-danger btn-sm btn-ripple" data-del="${f.id}">
+            <i class="bi bi-trash"></i>
+          </button>
+        </td>
+      `;
+      rows.appendChild(tr);
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // EDITAR
+  // ------------------------------------------------------------------
+  rows.addEventListener("click", ev=>{
+    const edit = ev.target.closest("button[data-edit]");
+    if(!edit) return;
+
+    const id = Number(edit.dataset.edit);
+    const item = records.find(x => x.id === id);
+    if(!item) return;
+
+    currentId = id;
+    hideFormError();
+
+    modalEl.querySelector(".modal-title").textContent = "Editar FAQ";
+
+    f_question.value = item.question;
+    f_answer.value = item.answer;
+    f_category.value = item.category;
+    f_active.checked = !!item.is_active;
+
+    modal.show();
+  });
+
+  // ------------------------------------------------------------------
+  // NUEVA FAQ
+  // ------------------------------------------------------------------
+  btnNew.onclick = () => {
+    currentId = null;
+    form.reset();
+    hideFormError();
+    modalEl.querySelector(".modal-title").textContent = "Nueva FAQ";
+    modal.show();
+  };
+
+  // ------------------------------------------------------------------
+  // GUARDAR
+  // ------------------------------------------------------------------
+  form.onsubmit = async e => {
+    e.preventDefault();
+    hideFormError();
+
+    const payload = {
+      question: f_question.value.trim(),
+      answer: f_answer.value.trim(),
+      category: Number(f_category.value),
+      is_active: f_active.checked,
+    };
+
+    let r;
+    if (currentId){
+      r = await sendJSON(`/api/faqs/${currentId}/`, "PUT", payload);
+    } else {
+      r = await sendJSON(`/api/faqs/`, "POST", payload);
+    }
+
+    if (!r.ok){
+      showFormError(r.error);
+      return;
+    }
+
+    modal.hide();
+    showGlobal("Guardado correctamente.");
+    load();
+  };
+
+  // ------------------------------------------------------------------
+  // ELIMINAR
+  // ------------------------------------------------------------------
+  rows.addEventListener("click", async ev=>{
+    const del = ev.target.closest("button[data-del]");
+    if(!del) return;
+
+    const id = Number(del.dataset.del);
+    const f = records.find(x=>x.id===id);
+    if(!f) return;
+
+    if(!confirm(`¿Eliminar la FAQ "${f.question}"?`)) return;
+
+    const r = await apiFetch(`/api/faqs/${id}/`, { method:"DELETE" });
+
+    if(!r.ok){
+      showGlobal("Error al eliminar", false);
+      return;
+    }
+
+    showGlobal("FAQ eliminada");
+    load();
+  });
+
+  // INIT
+  btnReload.onclick = load;
+  loadCategories();
+  load();
+
+})();
+</script>
+{% endblock %}

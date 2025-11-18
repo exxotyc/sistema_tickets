@@ -1,0 +1,275 @@
+{% extends "tickets/base.html" %}
+{% block title %}Mantenedor · Prioridades{% endblock %}
+
+{% block extra_head %}
+<style>
+  .glass{
+    background:rgba(255,255,255,.92);
+    backdrop-filter:blur(6px);
+    border:1px solid rgba(15,23,42,.06);
+    border-radius:1rem
+  }
+  .fade-in{animation:fadeIn .4s ease}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+  .tag{font-size:.75rem}
+  .table-hover tbody tr:hover{background:#f8fafc}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="glass p-3 p-md-4 fade-in">
+
+  <!-- Header -->
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h5 m-0 d-flex align-items-center gap-2">
+      <i class="bi bi-flag-fill text-primary"></i> Prioridades
+    </h1>
+    <div class="d-flex gap-2">
+      <button id="btnNew" class="btn btn-primary btn-sm btn-ripple">
+        <i class="bi bi-plus-lg me-1"></i>Nueva
+      </button>
+      <button id="btnReload" class="btn btn-outline-secondary btn-sm btn-ripple">
+        <i class="bi bi-arrow-clockwise me-1"></i>Recargar
+      </button>
+      <a class="btn btn-outline-secondary btn-sm btn-ripple" href="{% url 'maint_index' %}">Volver</a>
+    </div>
+  </div>
+
+  <!-- Mensaje Global -->
+  <div id="globalMsg" class="alert d-none" role="alert"></div>
+
+  <!-- Tabla -->
+  <div class="table-responsive">
+    <table class="table table-hover align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>Nombre</th>
+          <th>Código</th>
+          <th style="width:120px">SLA (min)</th>
+          <th style="width:110px">Activa</th>
+          <th class="text-end" style="width:160px">Acciones</th>
+        </tr>
+      </thead>
+      <tbody id="rows">
+        <tr><td colspan="5" class="text-center text-muted py-4">Cargando…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- MODAL -->
+<div class="modal fade" id="priorityModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+
+      <form id="priorityForm">
+        <div class="modal-header">
+          <h5 class="modal-title" id="modalTitle">Nueva prioridad</h5>
+          <button class="btn-close" type="button" data-bs-dismiss="modal"></button>
+        </div>
+
+        <div class="modal-body">
+          <div id="formAlert" class="alert alert-danger d-none small"></div>
+
+          <div class="mb-3">
+            <label class="form-label">Nombre</label>
+            <input id="f_name" type="text" class="form-control" required placeholder="Ej: Alta, Media…">
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">Código</label>
+            <input id="f_code" type="text" class="form-control" required placeholder="low, medium, high, critical">
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">SLA (minutos)</label>
+            <input id="f_sla" type="number" class="form-control" min="1" required placeholder="60">
+          </div>
+
+          <div class="form-check form-switch">
+            <input id="f_active" class="form-check-input" type="checkbox" checked>
+            <label for="f_active" class="form-check-label">Activa</label>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn btn-outline-secondary btn-ripple" type="button" data-bs-dismiss="modal">Cancelar</button>
+          <button class="btn btn-primary btn-ripple" type="submit">Guardar</button>
+        </div>
+      </form>
+
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function(){
+
+  function esc(s){return String(s||"").replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));}
+
+  const rows = document.getElementById("rows");
+  const btnNew = document.getElementById("btnNew");
+  const btnReload = document.getElementById("btnReload");
+  const globalMsg = document.getElementById("globalMsg");
+
+  const modalEl = document.getElementById("priorityModal");
+  const modal = new bootstrap.Modal(modalEl);
+  const form = document.getElementById("priorityForm");
+  const formAlert = document.getElementById("formAlert");
+  const modalTitle = document.getElementById("modalTitle");
+
+  let currentId = null;
+  let records = [];
+
+  function showGlobal(msg, ok=true){
+    globalMsg.className = "alert " + (ok ? "alert-success" : "alert-danger");
+    globalMsg.textContent = msg;
+    globalMsg.classList.remove("d-none");
+    setTimeout(()=>globalMsg.classList.add("d-none"),2000);
+  }
+  function showFormError(msg){
+    formAlert.textContent = msg;
+    formAlert.classList.remove("d-none");
+  }
+  function hideFormError(){
+    formAlert.classList.add("d-none");
+  }
+
+  // Cargar lista
+  async function load(){
+    rows.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Cargando…</td></tr>';
+    const r = await apiFetch("/api/priorities/");
+    if(!r) return;
+    const j = await r.json();
+    records = j || [];
+    render();
+  }
+
+  // Render tabla
+  function render(){
+    if(!records.length){
+      rows.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Sin prioridades</td></tr>';
+      return;
+    }
+    rows.innerHTML = "";
+    records.forEach(p=>{
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${esc(p.name)}</td>
+        <td><code>${esc(p.code)}</code></td>
+        <td>${p.sla_minutes}</td>
+        <td>${p.is_active ? '<span class="badge text-bg-success">Sí</span>' : '<span class="badge text-bg-secondary">No</span>'}</td>
+        <td class="text-end">
+          <button class="btn btn-outline-primary btn-sm btn-ripple me-1" data-edit="${p.id}">
+            <i class="bi bi-pencil"></i>
+          </button>
+          <button class="btn btn-outline-danger btn-sm btn-ripple" data-del="${p.id}">
+            <i class="bi bi-trash"></i>
+          </button>
+        </td>
+      `;
+      rows.appendChild(tr);
+    });
+  }
+
+  // Crear
+  btnNew.addEventListener("click", ()=>{
+    currentId = null;
+    form.reset();
+    hideFormError();
+    modalTitle.textContent = "Nueva prioridad";
+    modal.show();
+  });
+
+  // Editar
+  rows.addEventListener("click", ev=>{
+    const btn = ev.target.closest("button[data-edit]");
+    if(!btn) return;
+
+    const id = Number(btn.dataset.edit);
+    const p = records.find(x=>x.id===id);
+    if(!p) return;
+
+    currentId = id;
+    hideFormError();
+    modalTitle.textContent = "Editar prioridad";
+
+    document.getElementById("f_name").value = p.name;
+    document.getElementById("f_code").value = p.code;
+    document.getElementById("f_sla").value = p.sla_minutes;
+    document.getElementById("f_active").checked = !!p.is_active;
+
+    modal.show();
+  });
+
+  // Eliminar
+  rows.addEventListener("click", async ev=>{
+    const btn = ev.target.closest("button[data-del]");
+    if(!btn) return;
+
+    const id = Number(btn.dataset.del);
+    const p = records.find(x=>x.id===id);
+    if(!p) return;
+
+    if(!confirm(`¿Eliminar la prioridad "${p.name}"?`)) return;
+
+    const r = await apiFetch(`/api/priorities/${id}/`, { method:"DELETE" });
+
+    if(!r.ok){
+      showGlobal("Error al eliminar.", false);
+      return;
+    }
+
+    showGlobal("Eliminada correctamente.", true);
+    load();
+  });
+
+  // Guardar
+  form.addEventListener("submit", async ev=>{
+    ev.preventDefault();
+    hideFormError();
+
+    const payload = {
+      name: document.getElementById("f_name").value.trim(),
+      code: document.getElementById("f_code").value.trim(),
+      sla_minutes: Number(document.getElementById("f_sla").value),
+      is_active: document.getElementById("f_active").checked
+    };
+
+    let r;
+    if(currentId){
+      r = await apiFetch(`/api/priorities/${currentId}/`, {
+        method:"PUT",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify(payload)
+      });
+    }else{
+      r = await apiFetch("/api/priorities/", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify(payload)
+      });
+    }
+
+    const j = await r.json().catch(()=>null);
+
+    if(!r.ok){
+      showFormError(j?.detail || j?.error || "Error al guardar.");
+      return;
+    }
+
+    modal.hide();
+    showGlobal("Guardado correctamente.", true);
+    load();
+  });
+
+  btnReload.addEventListener("click", load);
+
+  load();
+
+})();
+</script>
+{% endblock %}

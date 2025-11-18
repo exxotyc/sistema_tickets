@@ -13,7 +13,12 @@
 {% endblock %}
 
 {% block content %}
-<div class="glass p-3 p-md-4" id="new-root">
+<div class="glass p-3 p-md-4" id="new-root"
+     data-is-admin-or-tecnico="{% if is_admin_or_tecnico %}1{% else %}0{% endif %}"
+     data-from-faq="{{ from_faq|default:'' }}"
+     data-from-faq-cat="{{ from_faq_category|default:'' }}"
+>
+
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h5 m-0 d-flex align-items-center gap-2">
       <i class="bi bi-plus-square"></i> Nuevo ticket
@@ -23,7 +28,17 @@
     </a>
   </div>
 
+  <!-- ⭐⭐⭐ BLOQUE AÑADIDO: Banner FAQ -->
+  {% if from_faq %}
+  <div class="alert alert-info d-flex align-items-center gap-2">
+    <i class="bi bi-info-circle"></i>
+    Este ticket fue iniciado desde una pregunta frecuente.
+  </div>
+  {% endif %}
+  <!-- ⭐⭐⭐ FIN BLOQUE AÑADIDO -->
+
   <form id="frmNew" class="row g-3">
+
     <div class="col-12">
       <label class="form-label">Título</label>
       <input id="title" class="form-control" required maxlength="200">
@@ -34,17 +49,12 @@
       <textarea id="description" class="form-control" rows="5" required></textarea>
     </div>
 
-    {# ⚙️ Campo de prioridad visible solo para admin/tecnico #}
-    {% if is_admin_or_tecnico %}
-    <div class="col-md-6">
+    <div class="col-md-6" id="priority-wrapper" style="display:none;">
       <label class="form-label">Prioridad</label>
       <select id="priority" class="form-select">
-        <option value="low">Baja</option>
-        <option value="medium" selected>Media</option>
-        <option value="high">Alta</option>
+        <option disabled selected>Cargando prioridades…</option>
       </select>
     </div>
-    {% endif %}
 
     <div class="col-md-6">
       <label class="form-label">Categoría</label>
@@ -53,7 +63,7 @@
       </select>
     </div>
 
-    <div class="col-12 d-flex gap-2">
+    <div class="col-12 d-flex gap-2 mt-2">
       <button class="btn btn-primary btn-ripple" type="submit">
         <i class="bi bi-save"></i> Crear
       </button>
@@ -61,7 +71,9 @@
         Cancelar
       </button>
     </div>
-    <div id="msg" class="form-text"></div>
+
+    <div id="msg" class="form-text mt-2"></div>
+
   </form>
 </div>
 {% endblock %}
@@ -69,95 +81,215 @@
 {% block auth_protect %}
 <script>
 (async ()=>{
-  const t = localStorage.getItem("access_token");
-  if(!t){ location.assign("/"); return; }
+  const access = localStorage.getItem("access_token");
+  if(!access){ location.assign("/"); return; }
+
   try{
-    const r = await fetch("/api/stats/", { headers:{ Authorization:"Bearer "+t }});
-    if(!r.ok) throw 0;
-  }catch(_){
-    const refresh = localStorage.getItem("refresh_token");
-    if(!refresh){ localStorage.clear(); location.assign("/"); return; }
-    const rr = await fetch("/api/token/refresh/", {
-      method:"POST", headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({ refresh })
-    });
-    if(!rr.ok){ localStorage.clear(); location.assign("/"); return; }
-    const data = await rr.json();
-    localStorage.setItem("access_token", data.access);
-  }
+    const r = await fetch("/api/stats/", { headers:{ Authorization:"Bearer "+access }});
+    if(r.ok) return;
+  }catch(_){}
+
+  const refresh = localStorage.getItem("refresh_token");
+  if(!refresh){ localStorage.clear(); location.assign("/"); return; }
+
+  const rr = await fetch("/api/token/refresh/", {
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ refresh })
+  });
+
+  if(!rr.ok){ localStorage.clear(); location.assign("/"); return; }
+
+  const data = await rr.json();
+  localStorage.setItem("access_token", data.access);
 })();
 </script>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-function authHeaders(){
-  const a = localStorage.getItem("access_token");
-  return { Authorization: "Bearer "+a };
-}
-async function api(url, opts={}){
-  const r = await fetch(url, { ...opts, headers:{ ...(opts.headers||{}), ...authHeaders(), "Content-Type":"application/json" }});
-  if(r.status!==401) return r;
-  const refresh = localStorage.getItem("refresh_token");
-  if(!refresh){ localStorage.clear(); location.assign("/"); return null; }
-  const rr = await fetch("/api/token/refresh/", {
-    method:"POST", headers:{ "Content-Type":"application/json" },
-    body: JSON.stringify({ refresh })
-  });
-  if(!rr.ok){ localStorage.clear(); location.assign("/"); return null; }
-  const data = await rr.json(); localStorage.setItem("access_token", data.access);
-  return fetch(url, { ...opts, headers:{ ...(opts.headers||{}), Authorization:"Bearer "+data.access, "Content-Type":"application/json" }});
-}
+(function()
+            {
+  function authHeader(){
+    const a = localStorage.getItem("access_token");
+    return a ? { Authorization: "Bearer " + a } : {};
+  }
 
-// carga categorías
-(async ()=>{
-  try{
-    const r = await api("/api/categories/");
-    if(!r) return;
-    const data = await r.json();
-    const sel = document.getElementById("category");
-    sel.innerHTML = '<option value="">Sin categoría</option>';
-    (data.results||data).forEach(c=>{
-      const o = document.createElement("option");
-      o.value = c.id; o.textContent = c.name;
-      sel.appendChild(o);
+  async function api(url, opts={}){
+    const r = await fetch(url, {
+      ...opts,
+      headers: {
+        ...(opts.headers || {}),
+        ...authHeader(),
+        ...(opts.body && !opts.headers?.["Content-Type"] && !(opts.body instanceof FormData)
+          ? { "Content-Type": "application/json" }
+          : {})
+      }
     });
-  }catch(_){}
+    return r;
+  }
+
+  const root = document.getElementById("new-root");
+  const isAdminOrTec = root?.dataset.isAdminOrTecnico === "1";
+  // Primero leer parámetros URL (si existe)
+  const params = new URLSearchParams(window.location.search);
+  const fromFaqParam = params.get("fromfaq") || "";
+  const fromFaqCatParam = params.get("fromfaqcat") || params.get("fromfaq_cat") || "";
+  // Dataset tiene prioridad si la plantilla lo estableció
+  const fromFAQ = root?.dataset.fromFaq || fromFaqParam || "";
+  // categoría sugerida desde FAQ (id o nombre parcial). Dataset tiene prioridad.
+  const catFromFAQ = root?.dataset.fromFaqCat || fromFaqCatParam || "";
+
+  const priorityWrapper = document.getElementById("priority-wrapper");
+  const prioritySelect  = document.getElementById("priority");
+  const categorySelect  = document.getElementById("category");
+  const msgEl           = document.getElementById("msg");
+  const titleEl         = document.getElementById("title");
+  const descEl          = document.getElementById("description");
+
+  // Autorrellenar si viene desde FAQ
+  if(fromFAQ){
+    titleEl.value = `[FAQ] ${fromFAQ}`;
+    descEl.value = `El usuario reporta que la siguiente pregunta de FAQ NO resolvió su problema:\n\n"${fromFAQ}"\n\nDescripción adicional: `;
+    msgEl.textContent = "Esta solicitud fue iniciada desde una Pregunta Frecuente.";
+    msgEl.className = "form-text text-primary fw-bold";
+  }
+
+  // Mostrar/ocultar campo prioridad según rol
+  if(isAdminOrTec && priorityWrapper){
+    priorityWrapper.style.display = "";
+  }
+
+  // Cargar categorías
+  (async ()=>{
+    try{
+      const r = await api("/api/categories/");
+      if(!r.ok) return;
+      const data = await r.json();
+      categorySelect.innerHTML = '<option value="">Sin categoría</option>';
+      (data.results || data).forEach(c=>{
+        const o = document.createElement("option");
+        o.value = c.id;
+        o.textContent = c.name;
+        categorySelect.appendChild(o);
+      });
+
+      // ⭐⭐⭐ preseleccionar categoría del FAQ (si viene el id o nombre)
+      if(catFromFAQ){
+        // intentar como id primero
+        const asString = String(catFromFAQ);
+        const byValue = Array.from(categorySelect.options).find(o => o.value === asString);
+        if(byValue){
+          categorySelect.value = asString;
+        }else{
+          // intentar por nombre parcial (case-insensitive)
+          const lower = asString.toLowerCase();
+          const byText = Array.from(categorySelect.options).find(o => o.textContent.toLowerCase().includes(lower));
+          if(byText){
+            categorySelect.value = byText.value;
+          }
+        }
+      }
+
+    }catch(e){
+      console.error("Error cargando categorías", e);
+    }
+  })();
+
+  // Cargar prioridades (solo si el wrapper está visible)
+  if(isAdminOrTec){
+    (async ()=>{
+      try{
+        const r = await api("/api/priorities/");
+        if(!r.ok){
+          prioritySelect.innerHTML = '<option disabled>Error cargando prioridades</option>';
+          return;
+        }
+        const data = await r.json();
+        const items = data.results || data;
+        if(!items.length){
+          prioritySelect.innerHTML = '<option disabled>No hay prioridades definidas</option>';
+          return;
+        }
+        prioritySelect.innerHTML = "";
+        items.forEach(p=>{
+          const o = document.createElement("option");
+          o.value = p.id;
+          o.textContent = `${p.name} (${p.code})`;
+          prioritySelect.appendChild(o);
+        });
+      }catch(e){
+        console.error("Error cargando prioridades", e);
+        prioritySelect.innerHTML = '<option disabled>Error cargando prioridades</option>';
+      }
+    })();
+  }
+
+  // Botón cancelar
+  document.getElementById("btnCancel").addEventListener("click", (e)=>{
+    e.preventDefault();
+    window.location.assign("{% url 'ticket_list' %}");
+  });
+
+  // Crear ticket
+  document.getElementById("frmNew").addEventListener("submit", async (e)=>{
+    e.preventDefault();
+    msgEl.textContent = "";
+    msgEl.className = "form-text";
+
+    const title = titleEl.value.trim();
+    const description = descEl.value.trim();
+    const category = categorySelect.value || null;
+
+    if(!title || !description){
+      msgEl.textContent = "Completa título y descripción.";
+      msgEl.className = "form-text text-danger";
+      return;
+    }
+
+    let priority = null;
+    if(isAdminOrTec && prioritySelect && prioritySelect.value){
+      priority = prioritySelect.value;
+    }
+
+    const payload = {
+      title,
+      description,
+      category,
+      priority
+    };
+
+    try{
+      const r = await api("/api/tickets/", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+
+      if(!r.ok){
+        let txt = "No se pudo crear el ticket.";
+        try{
+          const j = await r.json();
+          txt = j.detail || j.error || JSON.stringify(j);
+        }catch{}
+        msgEl.textContent = txt;
+        msgEl.className = "form-text text-danger";
+        return;
+      }
+
+      const t = await r.json();
+      if(t && t.id){
+        window.location.assign(`/tickets/${t.id}/`);
+      }else{
+        msgEl.textContent = "Ticket creado pero no se recibió ID.";
+        msgEl.className = "form-text text-warning";
+      }
+    }catch(err){
+      console.error("Error creando ticket", err);
+      msgEl.textContent = "Error inesperado al crear el ticket.";
+      msgEl.className = "form-text text-danger";
+    }
+  });
+
 })();
-
-document.getElementById("btnCancel").addEventListener("click", (e)=>{
-  e.preventDefault(); window.location.assign("{% url 'ticket_list' %}");
-});
-
-document.getElementById("frmNew").addEventListener("submit", async (e)=>{
-  e.preventDefault();
-  const msg = document.getElementById("msg");
-  msg.textContent = "";
-
-  // Si el campo prioridad no existe (es solicitante), la fuerza a "medium"
-  const priorityField = document.getElementById("priority");
-  const priority = priorityField ? priorityField.value : "medium";
-
-  const payload = {
-    title: document.getElementById("title").value.trim(),
-    description: document.getElementById("description").value.trim(),
-    priority: priority,
-    category: document.getElementById("category").value || null,
-  };
-
-  if(!payload.title || !payload.description){
-    msg.textContent="Completa título y descripción.";
-    msg.className="form-text text-danger"; return;
-  }
-
-  const r = await api("/api/tickets/", { method:"POST", body: JSON.stringify(payload) });
-  if(!r || !r.ok){
-    let txt="No se pudo crear.";
-    try{ const j=await r.json(); txt=j.detail||j.error||txt; }catch{}
-    msg.textContent=txt; msg.className="form-text text-danger"; return;
-  }
-  const t = await r.json();
-  window.location.assign(`/tickets/${t.id}/`);
-});
 </script>
 {% endblock %}

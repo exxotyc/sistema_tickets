@@ -3,7 +3,12 @@
 
 {% block extra_head %}
 <style>
-  .glass{background:rgba(255,255,255,.92); backdrop-filter:blur(6px); border:1px solid rgba(15,23,42,.06); border-radius:1rem}
+  .glass{
+    background:rgba(255,255,255,.92);
+    backdrop-filter:blur(6px);
+    border:1px solid rgba(15,23,42,.06);
+    border-radius:1rem
+  }
   .meta dt{color:#6c757d; width:140px}
   .meta dd{margin-bottom:.5rem}
   .attachment{display:flex; align-items:center; gap:.5rem}
@@ -36,11 +41,10 @@
         </div>
       </div>
 
+      <!-- Comentarios -->
       <div class="card mt-3">
         <div class="card-body">
-          <div class="d-flex justify-content-between align-items-center mb-2">
-            <h6 class="m-0"><i class="bi bi-chat-left-text me-1"></i> Comentarios</h6>
-          </div>
+          <h6 class="mb-2"><i class="bi bi-chat-left-text me-1"></i> Comentarios</h6>
 
           <ul id="comments" class="list-group list-group-flush mb-3"></ul>
 
@@ -51,6 +55,7 @@
         </div>
       </div>
 
+      <!-- Adjuntos -->
       <div class="card mt-3">
         <div class="card-body">
           <h6 class="mb-2"><i class="bi bi-paperclip me-1"></i> Adjuntos</h6>
@@ -59,7 +64,7 @@
           <form id="frmAttach" class="d-flex flex-wrap gap-2" enctype="multipart/form-data">
             <input id="file" name="file" type="file" class="form-control"
                    accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.xlsx,.docx,.pptx,.log"
-                   required data-validate-file>
+                   required>
             <button class="btn btn-outline-primary btn-ripple" type="submit">
               <i class="bi bi-upload"></i> Subir
             </button>
@@ -70,7 +75,8 @@
 
     <!-- Col lateral -->
     <div class="col-lg-4">
-      <!-- Panel admin -->
+
+      <!-- Panel admin / técnico -->
       <div id="adminPanel" class="card d-none">
         <div class="card-body">
           <h6 class="mb-3"><i class="bi bi-tools me-1"></i> Acciones de administración</h6>
@@ -81,9 +87,7 @@
               <select id="techSelect" class="form-select">
                 <option value="" selected disabled>Cargando…</option>
               </select>
-              <button id="btnAssign" class="btn btn-primary btn-ripple" title="Asignar">
-                <i class="bi bi-person-check"></i>
-              </button>
+              <button id="btnAssign" class="btn btn-primary btn-ripple"><i class="bi bi-person-check"></i></button>
             </div>
             <div id="assignMsg" class="form-text"></div>
           </div>
@@ -98,12 +102,11 @@
                 <option value="closed">Cerrado</option>
               </select>
             </div>
+
             <div class="col-6">
               <label class="form-label">Prioridad</label>
               <select id="prioSelect" class="form-select form-select-sm">
-                <option value="low">Baja</option>
-                <option value="medium">Media</option>
-                <option value="high">Alta</option>
+                <option disabled>Cargando…</option>
               </select>
             </div>
           </div>
@@ -125,10 +128,11 @@
               <i class="bi bi-arrow-counterclockwise"></i> Reabrir
             </button>
           </div>
+
         </div>
       </div>
 
-      <!-- Detalle -->
+      <!-- Panel detalle -->
       <div class="card mt-3">
         <div class="card-body">
           <h6 class="mb-3">Detalle</h6>
@@ -144,6 +148,7 @@
           </dl>
         </div>
       </div>
+
     </div>
   </div>
 </div>
@@ -154,245 +159,293 @@
 (async function ensureAuth(){
   const access = localStorage.getItem("access_token");
   if(!access){ location.href="/"; return; }
-  try{
-    const r = await fetch("/api/stats/", { headers:{ Authorization:"Bearer "+access }});
-    if(r.ok) return;
-  }catch(_){}
-  const refresh = localStorage.getItem("refresh_token");
-  if(!refresh){ localStorage.clear(); location.href="/"; return; }
-  const rr = await fetch("/api/token/refresh/", {
-    method:"POST", headers:{ "Content-Type":"application/json" },
-    body: JSON.stringify({ refresh })
-  });
-  if(!rr.ok){ localStorage.clear(); location.href="/"; return; }
-  const data = await rr.json(); localStorage.setItem("access_token", data.access);
+  const r = await fetch("/api/stats/", { headers:{ Authorization:"Bearer "+access }});
+  if(r.ok) return;
+  localStorage.clear(); location.href="/";
 })();
 </script>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-  if(typeof window.apiFetch!=="function"){
-    window.apiFetch = async function(url, opts={}){
-      const access = localStorage.getItem("access_token");
-      const finalUrl = url.startsWith("http") ? url : (url.startsWith("/api") ? url : "/api"+url);
-      const r = await fetch(finalUrl, { ...opts, headers:{...(opts.headers||{}), Authorization:"Bearer "+access }});
-      if(r.status !== 401) return r;
-      const refresh = localStorage.getItem("refresh_token");
-      if(!refresh){ localStorage.clear(); location.assign("{% url 'login' %}"); return null; }
-      const rr = await fetch("/api/token/refresh/", {
-        method:"POST", headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ refresh })
-      });
-      if(!rr.ok){ localStorage.clear(); location.assign("{% url 'login' %}"); return null; }
-      const data = await rr.json();
-      localStorage.setItem("access_token", data.access);
-      return fetch(finalUrl, { ...opts, headers:{...(opts.headers||{}), Authorization:"Bearer "+data.access }});
-    }
-  }
 
-  const ROOT = document.getElementById("ticket-root");
-  const TICKET_ID = Number(ROOT?.dataset.ticketId || "0");
-  const SERVER_ADMIN = ROOT?.dataset.admin === "1";
+// =========================
+//   ROOT + CONSTANTES
+// =========================
+const ROOT = document.getElementById("ticket-root");
+const TICKET_ID = Number(ROOT.dataset.ticketId);
+const SERVER_ADMIN = ROOT.dataset.admin === "1";
 
-  function esc(s){return String(s||"").replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));}
-  function fmt(d){ if(!d) return "-"; const dt=new Date(d); return dt.toLocaleString(); }
-  async function getJSON(url){ const r=await apiFetch(url); if(!r) return null; return r.json(); }
-  async function sendJSON(url, method, body){
-    const r = await apiFetch(url,{method, headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body)});
-    if(!r) return { ok:false, error:"No autenticado o token inválido" };
-    if(!r.ok){
-      let msg="Error";
-      try{ const j=await r.json(); msg=j.detail||j.error||JSON.stringify(j); }catch{}
-      return { ok:false, error:msg };
-    }
-    try{ return { ok:true, data: await r.json() }; }catch{ return { ok:true, data:null }; }
-  }
-
-  async function loadTicket(){
-    const data = await getJSON(`/api/tickets/${TICKET_ID}/`);
-    if(!data){ alert("No se pudo cargar el ticket."); location.href="{% url 'ticket_list' %}"; return; }
-
-    document.getElementById("tTitle").innerHTML = `<i class="bi bi-ticket-perforated"></i> Ticket #${data.id}`;
-    document.getElementById("title").textContent = data.title || "Sin título";
-    document.getElementById("description").textContent = data.description || "—";
-
-    document.getElementById("m_id").textContent       = data.id;
-    document.getElementById("m_state").textContent    = data.state || "-";
-    document.getElementById("m_priority").textContent = data.priority || "-";
-    document.getElementById("m_category").textContent = data.category_name || data.category || "-";
-    document.getElementById("m_requester").textContent= data.requester_username || data.requester || "-";
-    document.getElementById("m_assigned").textContent = data.assigned_to_username || data.assigned_to || "-";
-    document.getElementById("m_created").textContent  = fmt(data.created_at);
-    document.getElementById("m_updated").textContent  = fmt(data.updated_at);
-
-    const stSel = document.getElementById("stateSelect");
-    const prSel = document.getElementById("prioSelect");
-    if(stSel) stSel.value = data.state || "open";
-    if(prSel) prSel.value = data.priority || "medium";
-  }
-
-  async function loadComments(){
-    const r = await apiFetch(`/api/comments/?ticket=${TICKET_ID}&ordering=created_at`);
-    if(!r) return;
-    const data = await r.json();
-    const items = data.results || (Array.isArray(data) ? data : []);
-    const ul = document.getElementById("comments");
-    ul.innerHTML = items.length ? "" : '<li class="list-group-item text-muted">Sin comentarios</li>';
-    for(const c of items){
-      const who = c.user_username || c.username || "usuario";
-      const li = document.createElement("li");
-      li.className = "list-group-item";
-      li.innerHTML = `<div class="d-flex justify-content-between">
-        <strong>${esc(who)}</strong><small class="text-muted">${fmt(c.created_at)}</small></div>
-        <div>${esc(c.content||"")}</div>`;
-      ul.appendChild(li);
-    }
-  }
-
-  async function loadAttachments(){
-    const r = await apiFetch(`/api/attachments/?ticket=${TICKET_ID}&ordering=-created_at`);
-    if(!r) return;
-    const data = await r.json();
-    const ul = document.getElementById("attachments"); ul.innerHTML="";
-    const items = data.results || data;
-    if(!items.length){ ul.innerHTML='<li class="list-group-item text-muted">Sin adjuntos</li>'; return; }
-    for(const a of items){
-      const url=a.file||a.url||a.path||"#";
-      ul.innerHTML += `<li class="list-group-item"><div class="attachment">
-        <i class="bi bi-paperclip"></i>
-        <a href="${esc(url)}" target="_blank">${esc(a.filename||url.split("/").pop())}</a>
-        <small class="text-muted ms-auto">${fmt(a.created_at)}</small></div></li>`;
-    }
-  }
-
-  async function detectRoles(){
-    try {
-      const r = await apiFetch("/api/stats/");
-      if(!r.ok) return [];
-      const data = await r.json();
-      const roles = data.user?.roles || [];
-      localStorage.setItem("roles", JSON.stringify(roles));
-      return roles;
-    } catch { return []; }
-  }
-
-  // --- Cargar lista de técnicos y administradores ---
-async function loadUsers() {
-  const sel = document.getElementById("techSelect");
-  sel.innerHTML = '<option value="" selected disabled>Cargando técnicos...</option>';
-
+//
+// API base
+//
+async function apiFetch(url, opts = {}) {
   const access = localStorage.getItem("access_token");
-  if (!access) {
-    sel.innerHTML = '<option value="" disabled>No autenticado</option>';
-    return;
+  const full = url.startsWith("/api") ? url : "/api" + url;
+
+  const r = await fetch(full, {
+    ...opts,
+    headers: { ...(opts.headers || {}), Authorization: "Bearer " + access }
+  });
+  return r;
+}
+
+function esc(s){
+  return String(s || "").replace(/[&<>"']/g, m => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
+  }[m]));
+}
+
+function fmt(d){ return d ? new Date(d).toLocaleString() : "-"; }
+
+async function getJSON(url){
+  const r = await apiFetch(url);
+  if(!r.ok) return null;
+  return r.json();
+}
+
+async function sendJSON(url, method, body){
+  const r = await apiFetch(url,{
+    method,
+    headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify(body)
+  });
+  if(!r.ok){
+    let msg="Error";
+    try{ const j = await r.json(); msg = j.detail || j.error || JSON.stringify(j); }catch{}
+    return { ok:false, error:msg };
   }
+  const data = await r.json().catch(()=>null);
+  return { ok:true, data };
+}
 
-  try {
-    const r = await fetch("/api/users/", {
-      headers: { Authorization: "Bearer " + access }
-    });
+//
+// Cargar prioridades (FK)
+//
+async function loadPriorities(){
+  const sel = document.getElementById("prioSelect");
+  sel.innerHTML = '<option disabled>Cargando…</option>';
 
-    if (!r.ok) {
-      sel.innerHTML = `<option value="" disabled>Error ${r.status}</option>`;
-      return;
-    }
+  const r = await apiFetch("/api/priorities/");
+  if(!r.ok){ sel.innerHTML='<option disabled>Error</option>'; return; }
 
-    const data = await r.json();
-    // 🔹 Filtramos solo técnicos o administradores
-    const filtered = (Array.isArray(data) ? data : []).filter(
-      u => Array.isArray(u.roles) && (u.roles.includes("tecnico") || u.roles.includes("admin"))
-    );
+  const data = await r.json();
+  const list = Array.isArray(data) ? data : data.results || data;
 
-    sel.innerHTML = '<option value="" selected disabled>Selecciona técnico</option>';
-    for (const u of filtered) {
-      const opt = document.createElement("option");
-      opt.value = u.id;
-      opt.textContent = `${u.username} (${u.roles.join(", ")})`;
-      sel.appendChild(opt);
-    }
+  sel.innerHTML = "";
+  list.forEach(p=>{
+    const o=document.createElement("option");
+    o.value = p.id;
+    o.textContent = `${p.name} (${p.code})`;
+    sel.appendChild(o);
+  });
+}
 
-    if (filtered.length === 0) {
-      sel.innerHTML = '<option value="" disabled>Sin técnicos disponibles</option>';
-    }
+//
+// Cargar ticket
+//
+async function loadTicket(){
+  const data = await getJSON(`/api/tickets/${TICKET_ID}/`);
+  if(!data){ alert("No se pudo cargar el ticket."); return; }
 
-  } catch (err) {
-    console.error("💥 Error al cargar usuarios:", err);
-    sel.innerHTML = '<option value="" disabled>Error al cargar técnicos</option>';
+  document.getElementById("tTitle").innerHTML = `<i class="bi bi-ticket-perforated"></i> Ticket #${data.id}`;
+  document.getElementById("title").textContent = data.title;
+  document.getElementById("description").textContent = data.description;
+
+  document.getElementById("m_id").textContent = data.id;
+  document.getElementById("m_state").textContent = data.state;
+  document.getElementById("m_priority").textContent = data.priority_name || "-";
+  document.getElementById("m_category").textContent = data.category_name || "-";
+  document.getElementById("m_requester").textContent = data.requester_username || "-";
+  document.getElementById("m_assigned").textContent = data.assigned_to_username || "-";
+  document.getElementById("m_created").textContent = fmt(data.created_at);
+  document.getElementById("m_updated").textContent = fmt(data.updated_at);
+
+  const stateSel = document.getElementById("stateSelect");
+  const prioSel = document.getElementById("prioSelect");
+
+  if(stateSel) stateSel.value = data.state;
+  if(prioSel && data.priority){
+    prioSel.value = data.priority; // ID de prioridad
   }
 }
 
+//
+// COMMENTS
+//
+async function loadComments(){
+  const r = await apiFetch(`/api/comments/?ticket=${TICKET_ID}&ordering=created_at`);
+  if(!r.ok) return;
+  const data = await r.json();
+  const list = data.results || data;
 
-  document.getElementById("btnAssign").addEventListener("click", async ()=>{
-    const msg = document.getElementById("assignMsg");
-    msg.className="form-text";
-    let user_id = document.getElementById("techSelect").value;
-    if(!user_id || user_id===""){
-      const roles = JSON.parse(localStorage.getItem("roles")||"[]");
-      if(roles.includes("tecnico")){
-        const r=await apiFetch("/api/stats/"); const j=await r.json();
-        user_id=j.user?.id;
-      }
-    }
-    if(!user_id){ msg.textContent="No se pudo determinar el usuario técnico."; msg.className="text-danger"; return; }
-    const r = await apiFetch(`/api/tickets/${TICKET_ID}/assign/`, {
-      method:"POST", headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({ user_id: Number(user_id) })
-    });
-    if(!r || !r.ok){ msg.textContent="Error al asignar."; msg.className="text-danger"; return; }
-    msg.textContent="Asignado correctamente."; msg.className="text-success"; await loadTicket();
+  const ul=document.getElementById("comments");
+  ul.innerHTML = list.length ? "" : '<li class="list-group-item text-muted">Sin comentarios</li>';
+
+  list.forEach(c=>{
+    const li=document.createElement("li");
+    li.className="list-group-item";
+    li.innerHTML = `
+      <div class="d-flex justify-content-between">
+        <strong>${esc(c.user_username)}</strong><small>${fmt(c.created_at)}</small>
+      </div>
+      <div>${esc(c.content)}</div>
+    `;
+    ul.appendChild(li);
   });
+}
 
-  async function saveMeta(state, priority){
-    const ids=["btnSaveMeta","btnStart","btnResolve","btnClose","btnReopen"];
-    ids.forEach(id=>{ const b=document.getElementById(id); if(b) b&&(b.disabled=true); });
-    const res = await sendJSON(`/api/tickets/${TICKET_ID}/`,"PATCH",{ state, priority });
-    ids.forEach(id=>{ const b=document.getElementById(id); if(b) b&&(b.disabled=false); });
-    if(!res.ok){ alert("Actualizar: "+res.error); return false; }
-    await loadTicket(); return true;
+//
+// ADJUNTOS
+//
+async function loadAttachments(){
+  const r = await apiFetch(`/api/attachments/?ticket=${TICKET_ID}`);
+  if(!r.ok) return;
+
+  const data = await r.json();
+  const list = data.results || data;
+
+  const ul=document.getElementById("attachments");
+  ul.innerHTML = list.length ? "" : '<li class="list-group-item text-muted">Sin adjuntos</li>';
+
+  list.forEach(a=>{
+    ul.innerHTML += `
+      <li class="list-group-item">
+        <div class="attachment">
+          <i class="bi bi-paperclip"></i>
+          <a href="${esc(a.file)}" target="_blank">${esc(a.filename)}</a>
+          <small class="text-muted ms-auto">${fmt(a.created_at)}</small>
+        </div>
+      </li>`;
+  });
+}
+
+//
+// Cargar técnicos
+//
+async function loadUsers(){
+  const sel=document.getElementById("techSelect");
+  const r = await apiFetch("/api/users/");
+  if(!r.ok){ sel.innerHTML='<option disabled>Error</option>'; return; }
+
+  const data=await r.json();
+  const list = Array.isArray(data) ? data : data.results || [];
+
+  const filtered = list.filter(u => u.roles && (u.roles.includes("admin") || u.roles.includes("tecnico")));
+
+  sel.innerHTML='<option value="" disabled selected>Seleccionar técnico</option>';
+  filtered.forEach(u=>{
+    const o=document.createElement("option");
+    o.value=u.id;
+    o.textContent = `${u.username} (${u.roles.join(",")})`;
+    sel.appendChild(o);
+  });
+}
+
+//
+// Guardar estado + prioridad
+//
+async function saveMeta(state, priority){
+  const res = await sendJSON(`/api/tickets/${TICKET_ID}/`, "PATCH", { state, priority });
+  if(!res.ok){ alert(res.error); return; }
+  await loadTicket();
+}
+
+//
+// Crear comentario
+//
+document.getElementById("frmComment").onsubmit = async e=>{
+  e.preventDefault();
+  const txt=document.getElementById("commentText");
+  const val=txt.value.trim();
+  if(!val) return;
+
+  const res=await sendJSON("/api/comments/","POST",{ ticket:TICKET_ID, content:val });
+  if(!res.ok){ alert(res.error); return; }
+
+  txt.value=""; loadComments();
+};
+
+//
+// Adjuntos
+//
+document.getElementById("frmAttach").onsubmit = async e=>{
+  e.preventDefault();
+  const sel=document.getElementById("file");
+  const file=sel.files[0];
+  if(!file) return;
+  const fd=new FormData();
+  fd.append("ticket",TICKET_ID);
+  fd.append("file",file);
+  const r = await apiFetch("/api/attachments/",{method:"POST",body:fd});
+  if(!r.ok){ alert("Error al subir archivo"); return; }
+  sel.value="";
+  loadAttachments();
+};
+
+//
+// ASIGNAR TÉCNICO
+//
+document.getElementById("btnAssign").onclick = async () => {
+    const sel = document.getElementById("techSelect");
+    const userId = sel.value;
+    const msg = document.getElementById("assignMsg");
+
+    if (!userId) {
+        msg.textContent = "Debes seleccionar un técnico.";
+        msg.className = "form-text text-danger";
+        return;
+    }
+
+    const res = await sendJSON(`/api/tickets/${TICKET_ID}/assign/`, "POST", {
+        user_id: Number(userId)
+    });
+
+    if (!res.ok) {
+        msg.textContent = res.error;
+        msg.className = "form-text text-danger";
+        return;
+    }
+
+    msg.textContent = `Asignado a ${res.data.assigned_to}`;
+    msg.className = "form-text text-success";
+
+    await loadTicket();
+};
+
+//
+// INIT
+//
+(async function init(){
+  if(!TICKET_ID){
+    console.error("No se encontró ticket_id en el template");
+    return;
   }
 
-  document.getElementById("btnSaveMeta").onclick=()=>saveMeta(stateSelect.value,prioSelect.value);
-  document.getElementById("btnStart").onclick=()=>saveMeta("in_progress",prioSelect.value);
-  document.getElementById("btnResolve").onclick=()=>saveMeta("resolved",prioSelect.value);
-  document.getElementById("btnClose").onclick=()=>saveMeta("closed",prioSelect.value);
-  document.getElementById("btnReopen").onclick=()=>saveMeta("open",prioSelect.value);
+  await loadPriorities();
+  await loadTicket();
+  await loadComments();
+  await loadAttachments();
 
-  document.getElementById("frmComment").addEventListener("submit", async e=>{
-    e.preventDefault();
-    const txt=document.getElementById("commentText");
-    const content=txt.value.trim(); if(!content) return;
-    const res=await sendJSON("/api/comments/","POST",{ ticket:TICKET_ID, content });
-    if(!res.ok){ alert("Comentario: "+res.error); return; }
-    txt.value=""; loadComments();
-  });
+  const r = await apiFetch("/api/stats/");
+  const data = r.ok ? await r.json() : {};
+  const roles = data.user?.roles || [];
 
-  document.getElementById("frmAttach").addEventListener("submit", async e=>{
-    e.preventDefault();
-    const f=document.getElementById("file").files[0];
-    if(!f) return;
-    const fd=new FormData(); fd.append("ticket",TICKET_ID); fd.append("file",f);
-    const r=await apiFetch("/api/attachments/",{method:"POST",body:fd});
-    if(!r||!r.ok){ alert("No se pudo subir el archivo."); return; }
-    document.getElementById("file").value=""; loadAttachments();
-  });
+  const adminP=document.getElementById("adminPanel");
 
-  (async function init(){
-    if(!TICKET_ID || Number.isNaN(TICKET_ID)){ location.href="{% url 'ticket_list' %}"; return; }
-    await loadTicket(); await loadComments(); await loadAttachments();
-    const roles = await detectRoles();
-    const isTech = roles.includes("tecnico");
-    const isAdminUser = roles.includes("admin") || SERVER_ADMIN;
-    if(isAdminUser || isTech){
-      document.getElementById("adminPanel").classList.remove("d-none");
-      if(isTech){
-        const techSelect=document.getElementById("techSelect");
-        techSelect.innerHTML='<option value="" selected>Asignarme a mí mismo</option>';
-        techSelect.disabled=true;
-      }else{
-        await loadUsers();
-      }
-    }
-  })();
+  if(roles.includes("admin") || roles.includes("tecnico") || SERVER_ADMIN){
+    adminP.classList.remove("d-none");
+    await loadUsers();
+  }
+
+  document.getElementById("btnSaveMeta").onclick = ()=>saveMeta(
+    document.getElementById("stateSelect").value,
+    document.getElementById("prioSelect").value
+  );
+  document.getElementById("btnStart").onclick = ()=>saveMeta("in_progress",document.getElementById("prioSelect").value);
+  document.getElementById("btnResolve").onclick = ()=>saveMeta("resolved",document.getElementById("prioSelect").value);
+  document.getElementById("btnClose").onclick = ()=>saveMeta("closed",document.getElementById("prioSelect").value);
+  document.getElementById("btnReopen").onclick = ()=>saveMeta("open",document.getElementById("prioSelect").value);
+})();
 </script>
 {% endblock %}

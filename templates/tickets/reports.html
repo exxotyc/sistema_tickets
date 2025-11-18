@@ -19,10 +19,11 @@
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
-
 {% endblock %}
 
 {% block content %}
+
+<!-- HEADER -->
 <div class="glass mb-3">
   <div class="d-flex justify-content-between align-items-center">
     <h1 class="h5 m-0 d-flex align-items-center gap-2">
@@ -37,6 +38,7 @@
   </div>
 </div>
 
+<!-- FILTROS -->
 <div class="glass mb-3">
   <form id="filters" class="row g-2 align-items-end">
     <div class="col-12 col-md-2">
@@ -47,18 +49,22 @@
         {% endfor %}
       </select>
     </div>
+
     <div class="col-12 col-md-3">
       <label class="form-label">Texto</label>
       <input name="q" class="form-control form-control-sm" placeholder="Título o descripción">
     </div>
+
     <div class="col-6 col-md-2">
       <label class="form-label">Desde</label>
       <input name="date_from" type="date" class="form-control form-control-sm">
     </div>
+
     <div class="col-6 col-md-2">
       <label class="form-label">Hasta</label>
       <input name="date_to" type="date" class="form-control form-control-sm">
     </div>
+
     <div class="col-12 col-md-2">
       <label class="form-label">Asignado</label>
       <select name="assignee" class="form-select form-select-sm">
@@ -68,12 +74,14 @@
         {% endfor %}
       </select>
     </div>
+
     <div class="col-12 col-md-1 text-end">
       <button class="btn btn-outline-secondary btn-sm btn-ripple w-100" type="submit">Filtrar</button>
     </div>
   </form>
 </div>
 
+<!-- CHARTS -->
 <div class="row g-3">
   <div class="col-lg-4">
     <div class="glass chart-card">
@@ -84,6 +92,7 @@
       <canvas id="chartState" height="180"></canvas>
     </div>
   </div>
+
   <div class="col-lg-8">
     <div class="glass chart-card">
       <strong>Tickets creados por mes</strong>
@@ -92,6 +101,7 @@
   </div>
 </div>
 
+<!-- TABLA PRINCIPAL -->
 <div class="glass mt-3">
   <div class="table-responsive">
     <table class="table table-hover align-middle mb-0">
@@ -110,15 +120,44 @@
     </table>
   </div>
 </div>
+
+<!-- MÉTRICAS DE FAQ -->
+<div class="card mt-4">
+  <div class="card-body">
+    <h5 class="mb-3">
+      <i class="bi bi-question-diamond text-primary"></i>
+      Métricas de FAQ
+    </h5>
+
+    <table class="table table-hover">
+      <thead>
+        <tr>
+          <th>Pregunta</th>
+          <th>Categoría</th>
+          <th>Útiles</th>
+          <th>No útiles</th>
+          <th>Total</th>
+          <th>% Utilidad</th>
+        </tr>
+      </thead>
+      <tbody id="faqReportRows">
+        <tr><td colspan="6" class="text-center text-muted">Cargando métricas…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
 <script>
 document.addEventListener("DOMContentLoaded", () => {
+
   const form = document.getElementById("filters");
   const rows = document.getElementById("rows");
   const totalCount = document.getElementById("totalCount");
   const btnExportCsv = document.getElementById("btnExportCsv");
+  const faqRows = document.getElementById("faqReportRows");
 
   const chartStateCtx = document.getElementById("chartState");
   const chartMonthCtx = document.getElementById("chartMonth");
@@ -133,16 +172,28 @@ document.addEventListener("DOMContentLoaded", () => {
     return p.toString();
   }
 
+  // =============================================
+  //     CARGAR DATOS DE TICKETS
+  // =============================================
   async function loadData(){
-    rows.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Cargando…</td></tr>';
+    rows.innerHTML =
+      '<tr><td colspan="5" class="text-center text-muted py-4">Cargando…</td></tr>';
+
     const url = "{% url 'reports_data' %}?" + qsParams();
     const r = await fetch(url);
+    if(!r.ok){
+      rows.innerHTML =
+        '<tr><td colspan="5" class="text-center text-danger py-4">Error cargando datos</td></tr>';
+      return;
+    }
+
     const j = await r.json();
 
-    // Tabla
+    // tabla
     if(!j.rows || !j.rows.length){
-      rows.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Sin resultados</td></tr>';
-    }else{
+      rows.innerHTML =
+        '<tr><td colspan="5" class="text-center text-muted py-4">Sin resultados</td></tr>';
+    } else {
       rows.innerHTML = j.rows.map(t => `
         <tr>
           <td>${t.id}</td>
@@ -154,10 +205,9 @@ document.addEventListener("DOMContentLoaded", () => {
       `).join("");
     }
 
-    // Total
     totalCount.textContent = j.total ?? 0;
 
-    // Chart por estado
+    // gráfico de estados
     const labelsState = ["open","in_progress","resolved","closed"];
     const pretty = {
       open: "Abiertos",
@@ -166,47 +216,112 @@ document.addEventListener("DOMContentLoaded", () => {
       closed: "Cerrados",
     };
     const dataState = labelsState.map(k => j.by_state?.[k] || 0);
-    if(chartState) chartState.destroy();
-   chartState = new Chart(chartStateCtx, {
-  type: "doughnut",
-  plugins: [ChartDataLabels],
-  data: {
-    labels: labelsState.map(k => pretty[k]),
-    datasets: [{ data: dataState }]
-  },
-  options: {
-    responsive: true,
-    plugins: {
-      legend: { position: "bottom" },
-      datalabels: {
-        color: "#000",
-        font: {
-          weight: "bold",
-          size: 12
-        },
-        formatter: (value) => value,  // muestra el número del segmento
-      }
-    }
-  }
-});
 
-    // Chart por mes
-    const labelsMonth = Object.keys(j.by_month || {});
-    const dataMonth = Object.values(j.by_month || {});
+    if(chartState) chartState.destroy();
+    chartState = new Chart(chartStateCtx, {
+      type: "doughnut",
+      plugins: (typeof ChartDataLabels !== "undefined") ? [ChartDataLabels] : [],
+      data: {
+        labels: labelsState.map(k => pretty[k]),
+        datasets: [{
+          data: dataState,
+          backgroundColor: ["#0d6efd","#0dcaf0","#198754","#6c757d"]
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { position: "bottom" },
+          datalabels: {
+            color: "#000",
+            font: { weight: "bold", size: 12 },
+            formatter: value => value
+          }
+        }
+      }
+    });
+
+    // gráfico por mes
+    const byMonth = j.by_month || {};
+    const labelsMonth = Object.keys(byMonth);
+    const dataMonth = labelsMonth.map(k => byMonth[k] || 0);
+
     if(chartMonth) chartMonth.destroy();
     chartMonth = new Chart(chartMonthCtx, {
       type: "line",
-      data: { labels: labelsMonth, datasets: [{ data: dataMonth, tension: .3, fill: false }] },
-      options: { responsive: true, plugins: { legend: { display:false } } }
+      data: {
+        labels: labelsMonth,
+        datasets: [{
+          data: dataMonth,
+          tension: .3,
+          borderColor: "#0d6efd",
+          backgroundColor: "#0d6efd"
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display:false } },
+        scales: {
+          x: { display: true },
+          y: { display: true, beginAtZero: true }
+        }
+      }
     });
 
-    // Export CSV con filtros actuales
     btnExportCsv.href = "{% url 'reports_export_csv' %}?" + qsParams();
   }
 
-  form.addEventListener("submit", (e) => { e.preventDefault(); loadData(); });
-  // carga inicial
+  // =============================================
+  //     CARGAR MÉTRICAS FAQ
+  // =============================================
+  async function loadFAQMetrics(){
+    faqRows.innerHTML =
+      '<tr><td colspan="6" class="text-center text-muted">Cargando métricas…</td></tr>';
+
+    try{
+      const access = localStorage.getItem("access_token");
+      const headers = access ? { Authorization: "Bearer " + access } : {};
+      const r = await fetch("/reportes/faq/", { headers });
+
+      if(!r.ok){
+        faqRows.innerHTML =
+          '<tr><td colspan="6" class="text-center text-danger">Error al cargar métricas</td></tr>';
+        return;
+      }
+
+      const data = await r.json();
+      if(!data.length){
+        faqRows.innerHTML =
+          '<tr><td colspan="6" class="text-center text-muted">Sin información de FAQ</td></tr>';
+        return;
+      }
+
+      faqRows.innerHTML = data.map(item => `
+        <tr>
+          <td>${item.question}</td>
+          <td>${item.category__name}</td>
+          <td><span class="badge text-bg-success">${item.utiles}</span></td>
+          <td><span class="badge text-bg-danger">${item.no_utiles}</span></td>
+          <td>${item.total}</td>
+          <td><strong>${item.utilidad_pct}%</strong></td>
+        </tr>
+      `).join("");
+
+    }catch(err){
+      console.error("FAQ METRICS ERROR:", err);
+      faqRows.innerHTML =
+        '<tr><td colspan="6" class="text-center text-danger">Error al cargar métricas</td></tr>';
+    }
+  }
+
+  form.addEventListener("submit", e => {
+    e.preventDefault();
+    loadData();
+  });
+
+  // Inicial
   loadData();
+  loadFAQMetrics();
 });
 </script>
 {% endblock %}
