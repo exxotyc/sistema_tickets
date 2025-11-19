@@ -8,8 +8,8 @@ from datetime import timedelta
 from django.db.models import Count, QuerySet, F, ExpressionWrapper, DurationField, Avg
 from django.utils.timezone import now
 
-from ..models import Comment, Ticket, TicketLog
-from ..services.sla import calculate_sla_status  # 👈 para usar la lógica de SLA real
+from ..models import Comment, Ticket, TicketLog, Priority
+from ..services.sla import calculate_sla_status  # 👈 SLA real
 
 __all__ = [
     "TicketMetricsService",
@@ -20,7 +20,6 @@ class TicketMetricsService:
     """Calcula KPIs de tickets: conteos, MTTR, FRT y cumplimiento de SLA."""
 
     STATE_CHOICES = ("open", "in_progress", "resolved", "closed")
-    P1_PRIORITIES = {"high", "critical"}
     RESOLUTION_TARGET_STATES = {"resolved", "closed"}
 
     def __init__(self, queryset: QuerySet[Ticket]):
@@ -28,6 +27,23 @@ class TicketMetricsService:
         self._tickets: Optional[List[Ticket]] = None
         self._logs_by_ticket: Optional[Dict[int, List[TicketLog]]] = None
         self._comments_by_ticket: Optional[Dict[int, List[Comment]]] = None
+
+        # ===========================================================
+        # PRIORIDADES P1 — SOLO USANDO CAMPOS REALES: code + name
+        # ===========================================================
+        posibles_p1 = ["critical", "high", "alta", "critica", "p1"]
+
+        # Buscar coincidencias REALES en Priority
+        ids_por_code = list(
+            Priority.objects.filter(code__in=posibles_p1).values_list("id", flat=True)
+        )
+
+        ids_por_name = list(
+            Priority.objects.filter(name__in=posibles_p1).values_list("id", flat=True)
+        )
+
+        # Unir IDs válidos
+        self.P1_PRIORITIES = list(set(ids_por_code + ids_por_name))
 
     # ------------------------------
     # Public API
@@ -51,7 +67,12 @@ class TicketMetricsService:
             state_counts[row["state"]] = row["total"]
 
         total = sum(state_counts.values())
-        p1_count = self.queryset.filter(priority__in=self.P1_PRIORITIES).count()
+
+        # --- Count P1 (solo IDs válidos)
+        p1_count = (
+            self.queryset.filter(priority_id__in=self.P1_PRIORITIES).count()
+            if self.P1_PRIORITIES else 0
+        )
 
         # --- MTTR (Mean Time To Resolve)
         qs_resolved = self.queryset.filter(
@@ -60,18 +81,24 @@ class TicketMetricsService:
             updated_at__isnull=False,
         )
         mttr_duration = qs_resolved.annotate(
-            dur=ExpressionWrapper(F("updated_at") - F("created_at"), output_field=DurationField())
+            dur=ExpressionWrapper(
+                F("updated_at") - F("created_at"),
+                output_field=DurationField()
+            )
         ).aggregate(avg=Avg("dur"))["avg"]
         mttr_hours = round(mttr_duration.total_seconds() / 3600, 2) if mttr_duration else 0
 
         # --- FRT (First Response Time)
         qs_frt = self.queryset.filter(frt_due_at__isnull=False)
         frt_duration = qs_frt.annotate(
-            frt_dur=ExpressionWrapper(F("frt_due_at") - F("created_at"), output_field=DurationField())
+            frt_dur=ExpressionWrapper(
+                F("frt_due_at") - F("created_at"),
+                output_field=DurationField()
+            )
         ).aggregate(avg=Avg("frt_dur"))["avg"]
         frt_hours = round(frt_duration.total_seconds() / 3600, 2) if frt_duration else 0
 
-        # --- SLA detallado (basado en calculate_sla_status)
+        # --- SLA detallado
         sla_ok = sla_risk = sla_breached = 0
         for ticket in self.tickets:
             try:
@@ -83,7 +110,6 @@ class TicketMetricsService:
                 else:
                     sla_ok += 1
             except Exception:
-                # En caso de error en un ticket, lo omitimos
                 continue
 
         sla_compliance = round((sla_ok / total) * 100, 2) if total else 0
@@ -91,10 +117,10 @@ class TicketMetricsService:
         return {
             "total": total,
             "by_state": state_counts,
-            "critical": p1_count,
-            "mttr_hours": mttr_hours,
-            "frt_hours": frt_hours,
-            "sla_compliance": sla_compliance,
+            "critical": p1_count,               # cantidad P1
+            "mttr_hours": mttr_hours,          # tiempo de resolución promedio
+            "frt_hours": frt_hours,            # tiempo de primera respuesta
+            "sla_compliance": sla_compliance,  # SLA %
             "sla_in_time": sla_ok,
             "sla_risk": sla_risk,
             "sla_breached": sla_breached,
@@ -104,7 +130,6 @@ class TicketMetricsService:
     # Métricas individuales
     # ------------------------------
     def first_resolution_at(self, ticket: Ticket) -> Optional[TicketLog]:
-        """Retorna el primer log que marcó el ticket como resuelto o cerrado."""
         for log in self._logs_for_ticket(ticket.id):
             if log.action in self.RESOLUTION_TARGET_STATES:
                 return log
@@ -115,14 +140,16 @@ class TicketMetricsService:
         return None
 
     def first_response_at(self, ticket: Ticket) -> Optional[Tuple[str, object]]:
-        """Devuelve la primera respuesta no solicitante (comentario o log)."""
         requester_id = ticket.requester_id
+
         for comment in self._comments_for_ticket(ticket.id):
             if comment.user_id and comment.user_id != requester_id:
                 return ("comment", comment)
+
         for log in self._logs_for_ticket(ticket.id):
             if log.user_id and log.user_id != requester_id:
                 return ("log", log)
+
         return None
 
     def per_ticket_metrics(self) -> Iterator[Tuple[Ticket, Optional[TicketLog], Optional[Tuple[str, object]]]]:
@@ -130,7 +157,6 @@ class TicketMetricsService:
             yield ticket, self.first_resolution_at(ticket), self.first_response_at(ticket)
 
     def minutes_between(self, start, end) -> Optional[float]:
-        """Calcula minutos entre dos timestamps."""
         if not start or not end:
             return None
         delta = end - start
@@ -139,40 +165,6 @@ class TicketMetricsService:
     # ------------------------------
     # Internals
     # ------------------------------
-    def _iter_resolution_minutes(self) -> Iterator[float]:
-        """Itera tiempos de resolución (solo P1)."""
-        for ticket, resolution_log, _ in self.per_ticket_metrics():
-            if ticket.priority not in self.P1_PRIORITIES:
-                continue
-            if resolution_log:
-                minutes = self.minutes_between(ticket.created_at, resolution_log.created_at)
-                if minutes is not None:
-                    yield minutes
-
-    def _iter_response_minutes(self) -> Iterator[float]:
-        """Itera tiempos de primera respuesta (solo P1)."""
-        for ticket, _, response in self.per_ticket_metrics():
-            if ticket.priority not in self.P1_PRIORITIES:
-                continue
-            if response:
-                kind, payload = response
-                response_dt = payload.created_at
-                minutes = self.minutes_between(ticket.created_at, response_dt)
-                if minutes is not None:
-                    yield minutes
-
-    @staticmethod
-    def _average_minutes(samples: Iterable[float]) -> Optional[float]:
-        """Calcula el promedio de minutos de una lista."""
-        total = 0.0
-        count = 0
-        for value in samples:
-            total += value
-            count += 1
-        if not count:
-            return None
-        return round(total / count, 2)
-
     def _logs_for_ticket(self, ticket_id: int) -> Sequence[TicketLog]:
         if self._logs_by_ticket is None:
             self._load_activity()
@@ -184,14 +176,15 @@ class TicketMetricsService:
         return self._comments_by_ticket.get(ticket_id, [])
 
     def _load_activity(self) -> None:
-        """Carga logs y comentarios de todos los tickets de una sola vez."""
         logs_by_ticket: Dict[int, List[TicketLog]] = defaultdict(list)
         comments_by_ticket: Dict[int, List[Comment]] = defaultdict(list)
+
         ids = self.ticket_ids
         if ids:
             for log in TicketLog.objects.filter(ticket_id__in=ids).order_by("created_at"):
                 logs_by_ticket[log.ticket_id].append(log)
             for comment in Comment.objects.filter(ticket_id__in=ids).order_by("created_at"):
                 comments_by_ticket[comment.ticket_id].append(comment)
+
         self._logs_by_ticket = logs_by_ticket
         self._comments_by_ticket = comments_by_ticket

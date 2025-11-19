@@ -1631,12 +1631,14 @@ def metrics_summary(request):
     - from / to : rango de fechas (created_at)
     - category  : id de categoría
     - assignee  : id de técnico
-    - priority  : prioridad (low/medium/high)
+    - priority  : prioridad (low/medium/high/critical...)
     """
     user = request.user
     qs = Ticket.objects.all()
 
+    # -----------------------------
     # RBAC
+    # -----------------------------
     if user.groups.filter(name="admin").exists():
         pass
     elif user.groups.filter(name="tecnico").exists():
@@ -1644,17 +1646,21 @@ def metrics_summary(request):
     else:
         qs = qs.filter(requester=user)
 
-    # Filtros
+    # -----------------------------
+    # Filtros básicos
+    # -----------------------------
     from_date = request.GET.get("from")
     to_date = request.GET.get("to")
     category = request.GET.get("category")
     assignee = request.GET.get("assignee")
     priority = request.GET.get("priority")
 
+    # Rango de fechas
     try:
         if from_date:
             from_date = make_aware(datetime.strptime(from_date, "%Y-%m-%d"))
             qs = qs.filter(created_at__gte=from_date)
+
         if to_date:
             to_date = make_aware(datetime.strptime(to_date, "%Y-%m-%d")) + timedelta(days=1)
             qs = qs.filter(created_at__lt=to_date)
@@ -1663,11 +1669,31 @@ def metrics_summary(request):
 
     if category:
         qs = qs.filter(category_id=category)
+
     if assignee:
         qs = qs.filter(assigned_to_id=assignee)
-    if priority:
-        qs = qs.filter(priority=priority)
 
+    # -----------------------------
+    # ✔ Filtro de prioridad FIX
+    # -----------------------------
+    if priority:
+        from tickets.models import Priority
+
+        prio_obj = (
+            Priority.objects.filter(slug__iexact=priority).first() or
+            Priority.objects.filter(name__iexact=priority).first() or
+            Priority.objects.filter(code__iexact=priority).first()
+        )
+
+        if prio_obj:
+            qs = qs.filter(priority_id=prio_obj.id)
+        else:
+            # Si no existe la prioridad → devolvemos queryset vacío
+            qs = qs.none()
+
+    # -----------------------------
+    # Métricas
+    # -----------------------------
     service = TicketMetricsService(qs)
     summary = service.summarize()
     return Response(summary)
