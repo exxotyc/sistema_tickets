@@ -67,6 +67,9 @@ web_urlpatterns = [
     path("tickets/new/", views.ticket_new, name="ticket_new"),
     path("tickets/<int:pk>/", views.ticket_detail, name="ticket_detail"),
     path("tickets/", views.tickets_alias, name="ticket_list_legacy"),
+    path("tickets/todos/", views.ticket_list_all, name="ticket_list_all"),
+    path("tickets/mios/", views.ticket_list_assigned, name="ticket_list_assigned"),
+
 
     # FAQ del Usuario (vista pública del sistema)
     path("faq/", views.faq_page, name="faq"),

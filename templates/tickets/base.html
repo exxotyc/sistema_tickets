@@ -114,6 +114,14 @@
                             <i class="bi bi-question-circle me-1"></i> FAQ
                         </a>
                     </li>
+                    {% if is_tecnico %}
+                      <li class="nav-item">
+                        <a class="nav-link" href="{% url 'ticket_list_assigned' %}">Mis Tickets</a>
+                      </li>
+                      <li class="nav-item">
+                        <a class="nav-link" href="{% url 'ticket_list_all' %}">Todos los Tickets</a>
+                      </li>
+                    {% endif %}
 
                     {% if is_admin or is_tecnico %}
                     <li class="nav-item">

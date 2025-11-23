@@ -29,6 +29,7 @@ from django.utils.timezone import make_aware, get_current_timezone
 from urllib.parse import urlencode
 from django.utils import timezone
 import io, csv, json
+from django.contrib.auth.models import User
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets, permissions, filters, status, mixins
 from rest_framework import serializers as drf_serializers
@@ -235,18 +236,21 @@ class TicketViewSet(viewsets.ModelViewSet):
         user = self.request.user
 
         qs = Ticket.objects.select_related(
-            "requester",
-            "assigned_to",
-            "category",
-            "priority"
+        "requester",
+        "assigned_to",
+        "category",
+        "priority"
         ).order_by("-created_at")
 
+    # Admin ve todo
         if user.groups.filter(name="admin").exists():
             return qs
 
+    # Técnico ve todo (pero las acciones se controlan en el frontend y en perform_update)
         if user.groups.filter(name="tecnico").exists():
-            return qs.filter(assigned_to=user)
+            return qs
 
+    # Usuario normal: solo sus tickets
         return qs.filter(requester=user)
 
     # ------------------------------------------------------
@@ -294,9 +298,12 @@ class TicketViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
     def assign(self, request, pk=None):
         """
-        Reasigna tickets:
-        - Admin puede asignar a cualquiera
-        - Técnico solo puede asignarse a sí mismo o tickets libres
+        Lógica corregida:
+        - ADMIN → puede asignar a cualquiera.
+        - TÉCNICO →
+            ✔ puede tomarse un ticket sin asignar
+            ✘ NO puede reasignar un ticket asignado a él
+            ✘ NO puede reasignar un ticket asignado a otros
         """
         user = request.user
         ticket = self.get_object()
@@ -304,48 +311,86 @@ class TicketViewSet(viewsets.ModelViewSet):
         is_admin = user.groups.filter(name="admin").exists()
         is_tech = user.groups.filter(name="tecnico").exists()
 
-        if not (is_admin or is_tech):
-            return Response({"detail": "No autorizado"}, status=status.HTTP_403_FORBIDDEN)
-
+        # --- validar parámetro ---
         user_id = request.data.get("user_id")
         if not user_id:
-            return Response({"error": "user_id requerido"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "user_id requerido"}, status=400)
 
-        # Obtener usuario destino
         try:
-            target_user = get_user_model().objects.get(pk=user_id)
-        except get_user_model().DoesNotExist:
-            return Response({"error": "Usuario no encontrado"}, status=status.HTTP_404_NOT_FOUND)
+            target = get_user_model().objects.get(pk=user_id)
+        except:
+            return Response({"error": "Usuario no encontrado"}, status=404)
 
-        # Restricción técnicos
-        if is_tech and target_user != user:
-            if ticket.assigned_to and ticket.assigned_to != user:
-                return Response(
-                    {"error": "No puedes asignar tickets ya asignados a otros."},
-                    status=status.HTTP_403_FORBIDDEN
+        # =====================================================
+        # ADMIN: acceso total
+        # =====================================================
+        if is_admin:
+            previous = ticket.assigned_to
+            ticket.assigned_to = target
+            ticket.save(update_fields=["assigned_to"])
+
+            TicketLog.objects.create(
+                ticket=ticket,
+                user=user,
+                action="reassigned",
+                meta_json={
+                    "from": previous.id if previous else None,
+                    "to": target.id,
+                    "username": target.username,
+                }
+            )
+
+            return Response({
+                "status": "assigned",
+                "assigned_to": target.username,
+                "by": user.username
+            })
+
+        # =====================================================
+        # TÉCNICO: LÓGICA ESTRICTA DE PERMISOS
+        # =====================================================
+        if is_tech:
+
+            # 1) Ticket SIN asignar → puede tomarlo, pero solo a sí mismo
+            if ticket.assigned_to is None:
+                if target != user:
+                    return Response(
+                        {"error": "Solo puedes asignarte a ti mismo"},
+                        status=403
+                    )
+
+                ticket.assigned_to = user
+                ticket.save(update_fields=["assigned_to"])
+
+                TicketLog.objects.create(
+                    ticket=ticket,
+                    user=user,
+                    action="assigned",
+                    meta_json={"to": user.id, "username": user.username}
                 )
 
-        previous = ticket.assigned_to
-        ticket.assigned_to = target_user
-        ticket.save(update_fields=["assigned_to"])
+                return Response({
+                    "status": "assigned",
+                    "assigned_to": user.username
+                })
 
-        # Registrar log
-        TicketLog.objects.create(
-            ticket=ticket,
-            user=user,
-            action="reassigned",
-            meta_json={
-                "from": previous.id if previous else None,
-                "to": target_user.id,
-                "username": target_user.username,
-            },
-        )
+            # 2) Ticket asignado a él → no puede reasignarlo
+            if ticket.assigned_to == user:
+                return Response(
+                    {"error": "No puedes reasignar un ticket que ya está asignado a ti"},
+                    status=403
+                )
 
-        return Response({
-            "status": "assigned",
-            "assigned_to": target_user.username,
-            "by": user.username
-        })
+            # 3) Ticket asignado a otro técnico → prohibido
+            return Response(
+                {"error": "No puedes reasignar tickets asignados a otros técnicos"},
+                status=403
+            )
+
+        # =====================================================
+        # Rol no autorizado
+        # =====================================================
+        return Response({"detail": "No autorizado"}, status=403)
 
 
 class CommentViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
@@ -533,8 +578,14 @@ def ticket_new(request):
     # ====================================================
     from_faq = request.GET.get("fromfaq", "").strip()
 
-    # 🚫 Bloquear acceso a técnicos
-    if request.user.groups.filter(name="tecnico").exists():
+    # ====================================================
+    # 0) PERMISOS: permitir crear tickets a:
+    #    - admin
+    #    - tecnico
+    #    - usuario (cualquiera autenticado)
+    # ====================================================
+    roles = set(request.user.groups.values_list("name", flat=True))
+    if not roles & {"admin", "tecnico", "usuario"}:
         messages.error(request, "No tienes permiso para crear tickets.")
         return redirect("ticket_list")
 
@@ -558,12 +609,13 @@ def ticket_new(request):
                     "is_admin_or_tecnico": request.user.groups.filter(
                         name__in=["admin", "tecnico"]
                     ).exists(),
-                    "from_faq": from_faq,   # 👈 volver a enviarlo al template
+                    "from_faq": from_faq,
                 },
             )
 
-        # 🔒 Forzar prioridad fija para solicitantes
-        if not _is_adminlike(request.user):
+        # 🔒 Forzar prioridad fija para solicitantes simples
+        # Admin y técnico pueden elegir prioridad
+        if "admin" not in roles and "tecnico" not in roles:
             priority = "medium"
 
         Ticket.objects.create(
@@ -591,9 +643,10 @@ def ticket_new(request):
             "is_admin_or_tecnico": request.user.groups.filter(
                 name__in=["admin", "tecnico"]
             ).exists(),
-            "from_faq": from_faq,   # 👈 clave para autorrellenar
+            "from_faq": from_faq,
         },
     )
+
 
 
 @login_required
@@ -661,67 +714,194 @@ def ticket_list(request):
     roles = set(user.groups.values_list("name", flat=True))
 
     qs = (
-        Ticket.objects.select_related("requester", "assigned_to", "category")
+        Ticket.objects.select_related("requester", "assigned_to", "category", "priority")
         .order_by("-created_at")
     )
 
     # --- RBAC
     if "admin" in roles:
-        pass  # Admin ve todos
+        pass  # Admin ve todo
     elif "tecnico" in roles:
         qs = qs.filter(assigned_to=user)
     else:
         qs = qs.filter(requester=user)
 
-    # --- Filtros GET
-    state = (request.GET.get("state") or "").strip()
-    q = (request.GET.get("q") or "").strip()
+    # ================================
+    #   Filtros GET avanzados
+    # ================================
+    state = request.GET.get("state") or ""
+    category = request.GET.get("category") or ""
+    priority = request.GET.get("priority") or ""
+    assignee = request.GET.get("assignee") or ""
+    from_date = request.GET.get("from") or ""
+    to_date = request.GET.get("to") or ""
+    q = request.GET.get("q") or ""
 
+    # --- FILTRO ESTADO
     if state:
         qs = qs.filter(state=state)
 
-    if q:
-        m = re.fullmatch(r"#?\s*(\d+)", q)
+    # --- FILTRO CATEGORÍA
+    if category.isdigit():
+        qs = qs.filter(category_id=int(category))
+
+    # --- FILTRO PRIORIDAD
+    if priority:
+        qs = qs.filter(priority__code=priority)
+
+    # --- FILTRO ASIGNADO
+    if assignee.isdigit():
+        qs = qs.filter(assigned_to_id=int(assignee))
+
+    # --- FILTRO DE FECHAS
+    try:
+        if from_date:
+            from_dt = make_aware(datetime.strptime(from_date, "%Y-%m-%d"))
+            qs = qs.filter(created_at__gte=from_dt)
+
+        if to_date:
+            to_dt = make_aware(datetime.strptime(to_date, "%Y-%m-%d")) + timedelta(days=1)
+            qs = qs.filter(created_at__lt=to_dt)
+    except Exception:
+        pass
+
+    # --- FILTRO TEXTO (ID / título / descripción)
+    if q.strip():
+        raw = q.strip()
+        m = re.fullmatch(r"#?\s*(\d+)", raw)
         if m:
-            ticket_id = int(m.group(1))
+            tid = int(m.group(1))
             qs = qs.filter(
-                Q(id=ticket_id)
-                | Q(title__icontains=q)
-                | Q(description__icontains=q)
+                Q(id=tid)
+                | Q(title__icontains=raw)
+                | Q(description__icontains=raw)
             )
         else:
-            qs = qs.filter(Q(title__icontains=q) | Q(description__icontains=q))
+            qs = qs.filter(
+                Q(title__icontains=raw) |
+                Q(description__icontains=raw)
+            )
 
-    # --- Fuerza evaluación y genera datos de depuración
+    # ================================
+    #   Evaluación final
+    # ================================
     tickets = list(qs)
-    ids = [t.id for t in tickets]
-    print(
-        "TICKET_LIST → user:",
-        user.username,
-        "| roles:",
-        roles,
-        "| count:",
-        len(tickets),
-        "| ids:",
-        ids,
-    )
 
-    # --- Determinar si es técnico (para el template)
     is_tecnico = "tecnico" in roles
 
-    # --- Render directo
+    # ================================
+    #   Para filtros del template
+    # ================================
+    categories = Category.objects.all().order_by("name")
+    priorities = Priority.objects.all().order_by("sla_minutes")
+    assignees = User.objects.filter(groups__name="tecnico").order_by("username")
+
+
     return render(
         request,
         "tickets/tickets_list.html",
         {
             "tickets": tickets,
             "tickets_count": len(tickets),
-            "tickets_ids": ids,
+
+            # Filtros actuales
             "state": state,
+            "priority": priority,
+            "category": category,
+            "assignee": assignee,
+            "from": from_date,
+            "to": to_date,
             "q": q,
+
+            # Datos para selects
+            "categories": categories,
+            "priorities": priorities,
+            "assignees": assignees,
+
             "is_tecnico": is_tecnico,
         },
     )
+
+@login_required
+def ticket_list_all(request):
+    user = request.user
+
+    if not user.groups.filter(name="tecnico").exists() and not user.groups.filter(name="admin").exists():
+        messages.error(request, "No tienes permiso para ver todos los tickets.")
+        return redirect("ticket_list")
+
+    qs = Ticket.objects.select_related(
+        "requester", "assigned_to", "category", "priority"
+    ).order_by("-created_at")
+
+    # Filtros generales
+    state = request.GET.get("state", "")
+    priority = request.GET.get("priority", "")
+    category = request.GET.get("category", "")
+    q = request.GET.get("q", "")
+
+    if state:
+        qs = qs.filter(state=state)
+
+    if priority:
+        qs = qs.filter(priority=priority)
+
+    if category:
+        qs = qs.filter(category_id=category)
+
+    if q:
+        qs = qs.filter(Q(title__icontains=q) | Q(description__icontains=q))
+
+    categories = Category.objects.order_by("name")
+    priorities = Priority.objects.order_by("name")
+
+    return render(request, "tickets/tickets_list_table.html", {
+        "tickets": qs,
+        "show_assignments": True,  # muestra columna asignado
+        "title": "Todos los tickets",
+        "categories": categories,
+        "priorities": priorities,
+        "filters": request.GET,
+    })
+@login_required
+def ticket_list_assigned(request):
+    user = request.user
+
+    if not user.groups.filter(name="tecnico").exists():
+        messages.error(request, "Solo los técnicos pueden ver esta sección.")
+        return redirect("ticket_list")
+
+    qs = Ticket.objects.select_related(
+        "requester", "assigned_to", "category", "priority"
+    ).filter(assigned_to=user).order_by("-created_at")
+
+    # Filtros iguales a la vista anterior
+    state = request.GET.get("state", "")
+    priority = request.GET.get("priority", "")
+    category = request.GET.get("category", "")
+    q = request.GET.get("q", "")
+
+    if state:
+        qs = qs.filter(state=state)
+    if priority:
+        qs = qs.filter(priority=priority)
+    if category:
+        qs = qs.filter(category_id=category)
+    if q:
+        qs = qs.filter(Q(title__icontains=q) | Q(description__icontains=q))
+
+    categories = Category.objects.order_by("name")
+    priorities = Priority.objects.order_by("name")
+
+    return render(request, "tickets/tickets_list_table.html", {
+        "tickets": qs,
+        "show_assignments": False,  # el técnico no necesita verse a sí mismo
+        "title": "Mis tickets asignados",
+        "categories": categories,
+        "priorities": priorities,
+        "filters": request.GET,
+    })
+
 
 
 @login_required
