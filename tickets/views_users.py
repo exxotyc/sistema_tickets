@@ -23,30 +23,63 @@ from .rbac import (
     LastAdminRemovalError,
 )
 
+from tickets.models import UserProfile, Area  # ← NECESARIO
+
 User = get_user_model()
 
 
+# ==========================================================
+#   PERMISOS
+# ==========================================================
 def _actor_can_use_user_maint(actor) -> bool:
-    # Mismo criterio que roles: superuser/staff o con capacidad de gestión
     if not actor or not actor.is_authenticated:
         return False
     return actor.is_superuser or actor.is_staff or bool(actor_allowed_roles(actor))
 
 
+# ==========================================================
+#   PAGE — MANTENEDOR DE USUARIOS
+# ==========================================================
 @login_required
 def users_page(request):
     if not _actor_can_use_user_maint(request.user):
-        return render(request, "403.html", status=403)
+        return render(request, "tickets/403.html", status=403)
 
     ensure_groups_exist()
 
+    from .models import Section
+    maint_sections = Section.objects.filter(is_active=True).order_by("title", "id")
+
+    # ============================
+    #   ROLES SEGÚN TIPO DE USUARIO
+    # ============================
+    actor = request.user
+    allowed = actor_allowed_roles(actor)
+
+    # 🧩 FIX CRÍTICO: si es admin/staff pero no tiene grupos, debe poder manejar todos los roles
+    if (actor.is_staff or actor.is_superuser) and not allowed:
+        allowed = MANAGED_ROLE_NAMES
+
+    role_options = [
+        {"code": r, "label": ROLE_LABELS.get(r, r)}
+        for r in MANAGED_ROLE_NAMES
+    ]
+
     ctx = {
-        "role_labels_json": json.dumps(ROLE_LABELS, ensure_ascii=False),
-        "managed_roles_json": json.dumps(sorted(MANAGED_ROLE_NAMES)),
+        "maint_sections": maint_sections,
+        "allowed_roles_json": json.dumps(list(allowed)),
+        "role_options_json": json.dumps(role_options),
+        "can_manage_staff": actor.is_staff or actor.is_superuser,
     }
+
     return render(request, "tickets/maint_usuarios.html", ctx)
 
 
+
+
+# ==========================================================
+#   API — LISTA DE USUARIOS
+# ==========================================================
 @login_required
 @require_GET
 def users_data(request):
@@ -64,6 +97,10 @@ def users_data(request):
     users: List[dict] = []
     for u in qs:
         roles = user_managed_roles(u)
+
+        # === PERFIL ===
+        profile, _ = UserProfile.objects.get_or_create(user=u)
+
         row = {
             "id": u.id,
             "username": u.username or "",
@@ -72,44 +109,34 @@ def users_data(request):
             "is_staff": bool(u.is_staff),
             "is_active": bool(u.is_active),
             "roles": sorted(set(roles)),
+            "area_id": profile.area_id,
+            "area_name": profile.area.name if profile.area else "",
         }
+
         if q:
             text = " ".join([
                 row["username"].lower(),
                 row["full_name"].lower(),
                 row["email"].lower(),
                 " ".join(row["roles"]).lower(),
+                (row["area_name"] or "").lower(),
             ])
             if q not in text:
                 continue
+
         users.append(row)
 
     return JsonResponse({"users": users})
 
 
+# ==========================================================
+#   API — CREAR / EDITAR USUARIO
+# ==========================================================
 @login_required
 @require_POST
 @transaction.atomic
 def users_save(request):
-    """
-    Crea o edita un usuario.
-    Payload esperado:
-      {
-        "id": null|int,            # null -> crear; int -> editar
-        "username": "foo",
-        "email": "a@b.c",
-        "first_name": "A",
-        "last_name": "B",
-        "is_staff": bool,
-        "is_active": bool,
-        "roles": ["admin"|"tecnico"|"usuario", ...],   # reemplazo total de roles administrables
-        "password": "opcional_en_creacion"             # si viene y es crear, set_password
-      }
-    Reglas:
-      - valida matriz de RBAC (assert_actor_can_manage)
-      - protege Último Admin (LastAdminRemovalError)
-      - admin y tecnico no simultáneos (en tu RBAC)
-    """
+
     if not _actor_can_use_user_maint(request.user):
         return JsonResponse({"ok": False, "error": "No autorizado."}, status=403)
 
@@ -129,31 +156,41 @@ def users_save(request):
     desired_roles = sorted(set(desired_roles))
     raw_password = data.get("password")
 
+    # === AREA DEL PERFIL ===
+    area_id = data.get("area")
+
     if not username:
         return HttpResponseBadRequest("username requerido")
 
-    # Crear
+    # =========================
+    # CREAR USUARIO
+    # =========================
     if uid is None:
         if User.objects.filter(username=username).exists():
             return JsonResponse({"ok": False, "error": "Username ya existe."}, status=400)
+
         user = User(username=username, email=email, first_name=first_name, last_name=last_name)
         user.is_staff = is_staff
         user.is_active = is_active
+
         if raw_password:
             user.set_password(raw_password)
         else:
-            # establece algo aleatorio; luego podrás forzar cambio si quieres
             user.set_unusable_password()
+
         user.save()
+
+    # =========================
+    # EDITAR USUARIO
+    # =========================
     else:
         user = get_object_or_404(User, pk=uid)
-        # antes de modificar roles o estado, valida RBAC
+
         try:
             _ = assert_actor_can_manage(request.user, user, desired_roles)
         except (LastAdminRemovalError, RolePermissionError) as e:
             return JsonResponse({"ok": False, "error": str(e)}, status=403)
 
-        # edita campos
         user.username = username
         user.email = email
         user.first_name = first_name
@@ -162,12 +199,25 @@ def users_save(request):
         user.is_active = is_active
         user.save()
 
-        # si te interesa permitir cambio de password en edición:
         if raw_password:
             user.set_password(raw_password)
             user.save()
 
-    # aplica roles (tanto para crear como para editar)
+    # ======================================================
+    #   GUARDAR EL ÁREA EN EL PERFIL
+    # ======================================================
+    profile, _ = UserProfile.objects.get_or_create(user=user)
+
+    if area_id:
+        profile.area_id = area_id
+    else:
+        profile.area = None
+
+    profile.save()
+
+    # ======================================================
+    #   APLICAR ROLES
+    # ======================================================
     try:
         desired_set = assert_actor_can_manage(request.user, user, desired_roles)
         final_roles: Iterable[str] = apply_roles(user, sorted(desired_set))
@@ -186,19 +236,20 @@ def users_save(request):
             "is_staff": bool(user.is_staff),
             "is_active": bool(user.is_active),
             "roles": list(final_roles),
+            "area_id": profile.area_id,
+            "area_name": profile.area.name if profile.area else "",
         }
     })
 
 
+# ==========================================================
+#   API — ACTIVAR / DESACTIVAR
+# ==========================================================
 @login_required
 @require_POST
 @transaction.atomic
 def users_toggle_active(request):
-    """
-    Activa/Desactiva un usuario.
-    Protege el último admin si la operación dejaría 0.
-    Payload: { "id": 123, "active": true|false }
-    """
+
     if not _actor_can_use_user_maint(request.user):
         return JsonResponse({"ok": False, "error": "No autorizado."}, status=403)
 
@@ -211,17 +262,13 @@ def users_toggle_active(request):
     active = bool(data.get("active", True))
     user = get_object_or_404(User, pk=uid)
 
-    # Validación de matriz: no puedas desactivar a alguien que no puedes gestionar
     try:
-        # Mantén sus roles actuales; solo validamos actor/target
         assert_actor_can_manage(request.user, user, user_managed_roles(user))
     except (LastAdminRemovalError, RolePermissionError) as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=403)
 
-    # Si vamos a desactivar y este usuario es (el) último admin, bloquear
     if not active:
         try:
-            # Pasando roles actuales; la helper debería chequear la condición de último admin
             assert_actor_can_manage(request.user, user, user_managed_roles(user))
         except LastAdminRemovalError as e:
             return JsonResponse({"ok": False, "error": str(e)}, status=409)

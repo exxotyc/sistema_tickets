@@ -48,7 +48,16 @@
     margin-bottom: 2rem;
 }
 
-/* Form styles */
+.alert-danger {
+    background: linear-gradient(135deg, #fef2f2 0%, #fecaca 100%);
+    border: 1px solid #fca5a5;
+    color: #dc2626;
+    border-radius: 0.75rem;
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.9rem;
+}
+
 .login-form .form-group {
     margin-bottom: 1.5rem;
 }
@@ -61,8 +70,7 @@
     font-size: 0.9rem;
 }
 
-.login-form input[type="text"],
-.login-form input[type="password"] {
+.login-form input {
     width: 100%;
     padding: 0.875rem 1rem;
     border: 2px solid #e2e8f0;
@@ -73,39 +81,13 @@
     box-shadow: 0 2px 4px rgba(2, 6, 23, 0.05);
 }
 
-.login-form input[type="text"]:focus,
-.login-form input[type="password"]:focus {
+.login-form input:focus {
     outline: none;
     border-color: var(--bg-a);
     box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
     transform: translateY(-1px);
 }
 
-.login-form input[type="text"]:hover,
-.login-form input[type="password"]:hover {
-    border-color: #cbd5e1;
-}
-
-/* Alert styles */
-.alert-danger {
-    background: linear-gradient(135deg, #fef2f2 0%, #fecaca 100%);
-    border: 1px solid #fca5a5;
-    color: #dc2626;
-    border-radius: 0.75rem;
-    padding: 1rem;
-    margin-bottom: 1.5rem;
-    font-size: 0.9rem;
-}
-
-.alert-danger div {
-    margin-bottom: 0.25rem;
-}
-
-.alert-danger div:last-child {
-    margin-bottom: 0;
-}
-
-/* Button styles */
 .login-btn {
     padding: 1rem;
     font-weight: 600;
@@ -121,14 +103,8 @@
 .login-btn:hover {
     transform: translateY(-2px);
     box-shadow: 0 8px 25px rgba(14, 165, 233, 0.4);
-    color: white;
 }
 
-.login-btn:active {
-    transform: translateY(0);
-}
-
-/* Back link */
 .back-link {
     color: #64748b !important;
     font-size: 0.9rem;
@@ -139,80 +115,6 @@
     color: var(--bg-a) !important;
 }
 
-/* Form paragraphs styling (for form.as_p) */
-.login-form p {
-    margin-bottom: 1.5rem;
-}
-
-.login-form p:last-of-type {
-    margin-bottom: 0;
-}
-
-/* Custom styling for Django form fields */
-.login-form input {
-    font-family: inherit;
-}
-
-/* Responsive design */
-@media (max-width: 768px) {
-    .login-container {
-        padding: 1rem;
-        min-height: calc(100vh - 150px);
-    }
-    
-    .login-card {
-        margin: 0;
-    }
-    
-    .col-sm-10 {
-        max-width: 100%;
-    }
-}
-
-@media (max-width: 576px) {
-    .login-card .card-body {
-        padding: 2rem 1.5rem;
-    }
-    
-    .login-title {
-        font-size: 1.25rem;
-    }
-    
-    .login-icon {
-        font-size: 2.5rem;
-    }
-}
-
-/* Animation for card entrance */
-@keyframes slideUp {
-    from {
-        opacity: 0;
-        transform: translateY(20px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-.login-card {
-    animation: slideUp 0.6s ease-out;
-}
-
-/* Focus states for accessibility */
-.login-form input:focus-visible {
-    outline: 2px solid var(--bg-a);
-    outline-offset: 2px;
-}
-
-/* Loading state */
-.login-btn:disabled {
-    opacity: 0.7;
-    cursor: not-allowed;
-    transform: none !important;
-}
-
-/* Custom background effect for login page */
 .login-bg-effect {
     position: fixed;
     top: 0;
@@ -260,17 +162,16 @@
   <div class="col-sm-10 col-md-6 col-lg-4">
     <div class="card login-card">
       <div class="card-body p-4 p-md-5">
+
         <div class="text-center mb-4">
           <i class="bi bi-shield-lock-fill login-icon"></i>
         </div>
+
         <h1 class="login-title text-center">Acceder al Sistema</h1>
         <p class="login-subtitle text-center">Ingresa con tus credenciales de Coyahue</p>
 
         {% if form.errors or form.non_field_errors %}
           <div class="alert alert-danger">
-            {% if form.non_field_errors %}
-              <div class="fw-semibold">Error de autenticación:</div>
-            {% endif %}
             {{ form.non_field_errors }}
             {% for field in form %}
               {% for error in field.errors %}
@@ -282,23 +183,19 @@
 
         <form method="post" action="{% url 'login' %}" class="login-form">
           {% csrf_token %}
-          
+
           <div class="form-group">
-            <label for="id_username">Usuario</label>
-            <input type="text" name="username" id="id_username" 
-                   class="form-control" placeholder="Ingresa tu usuario" 
-                   required autocomplete="username">
+            <label for="{{ form.username.id_for_label }}">Usuario</label>
+            {{ form.username }}
           </div>
-          
+
           <div class="form-group">
-            <label for="id_password">Contraseña</label>
-            <input type="password" name="password" id="id_password" 
-                   class="form-control" placeholder="Ingresa tu contraseña" 
-                   required autocomplete="current-password">
+            <label for="{{ form.password.id_for_label }}">Contraseña</label>
+            {{ form.password }}
           </div>
-          
-          <input type="hidden" name="next" value="{{ request.GET.next|default:'' }}">
-          
+
+          <input type="hidden" name="next" value="{{ next }}">
+
           <button class="btn login-btn w-100 btn-ripple" type="submit">
             <i class="bi bi-box-arrow-in-right me-2"></i> Iniciar Sesión
           </button>
@@ -309,6 +206,7 @@
             <i class="bi bi-arrow-left me-1"></i> Volver al inicio
           </a>
         </div>
+
       </div>
     </div>
   </div>

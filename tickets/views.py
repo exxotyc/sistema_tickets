@@ -33,6 +33,11 @@ from django.contrib.auth.models import User
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets, permissions, filters, status, mixins
 from rest_framework import serializers as drf_serializers
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework.authentication import SessionAuthentication
+from rest_framework.permissions import AllowAny
+
+
 from rest_framework.decorators import (
     action,
     api_view,
@@ -73,6 +78,7 @@ from .models import (
     FAQ,
     FAQFeedback,
     Priority,
+    Area,
 )
 from .permissions import IsTicketActorOrAdmin
 from .serializers import (
@@ -85,6 +91,7 @@ from .serializers import (
     UserAdminSerializer,
     UserSummarySerializer,
     PrioritySerializer,
+    AreaSerializer,
 )
 from .reports import build_report_rows, filters_footer
 from .services.assets import build_asset_history
@@ -161,6 +168,14 @@ class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all().order_by("name")
     serializer_class = CategorySerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+class AreaViewSet(viewsets.ModelViewSet):
+    queryset = Area.objects.all().order_by("name")
+    serializer_class = AreaSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    authentication_classes = [JWTAuthentication, SessionAuthentication]
+
 
 # tickets/views.py
 
@@ -258,9 +273,17 @@ class TicketViewSet(viewsets.ModelViewSet):
     # ------------------------------------------------------
     def perform_create(self, serializer):
         user = self.request.user
-        if not user.is_authenticated:
-            raise PermissionDenied("Debes iniciar sesión para crear tickets.")
-        return serializer.save(requester=user)
+
+    # Herdar área del usuario
+        area = None
+        if hasattr(user, "profile") and user.profile.area:
+                area = user.profile.area
+
+        return serializer.save(
+            requester=user,
+            area=area,
+        )
+
 
     # ------------------------------------------------------
     # ACTUALIZAR TICKET (corregido prioridad FK)
@@ -561,14 +584,28 @@ def stats(request):
     }
     return Response(data)
 
-@api_view(["POST"])
-@permission_classes([permissions.IsAuthenticated])
-@authentication_classes([SessionAuthentication])
-def session_token(request):
-    refresh = RefreshToken.for_user(request.user)
-    return Response({"access": str(refresh.access_token), "refresh": str(refresh)})
 
-# ==================== Vistas HTML ====================
+
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework.response import Response
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])   # ← IMPORTANTE
+def session_token(request):
+
+    user = request.user  # ya viene autenticado gracias al decorador
+
+    refresh = RefreshToken.for_user(user)
+
+    return Response({
+        "access": str(refresh.access_token),
+        "refresh": str(refresh)
+    })
+
+
+# ========== Vistas HTML ====================
 
 @login_required
 def ticket_new(request):
@@ -2234,5 +2271,27 @@ def reportes_faq(request):
         })
 
     return JsonResponse(results, safe=False)
+
+
+
+# ==========================================================
+#   MANTENEDOR DE ÁREAS (NUEVO)
+# ==========================================================
+@login_required
+def maint_areas(request):
+    # Solo administradores pueden entrar
+    if not request.user.groups.filter(name="admin").exists():
+        return render(request, "tickets/403.html", status=403)
+
+    areas = Area.objects.order_by("name")
+
+    return render(
+        request,
+        "tickets/maint_areas.html",
+        {
+            "areas": areas,
+            "title": "Mantenedor de Áreas",
+        },
+    )
 
 

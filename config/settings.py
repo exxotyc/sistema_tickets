@@ -125,6 +125,7 @@ CORS_ALLOW_CREDENTIALS = False
 # ===============================
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
+        "rest_framework.authentication.SessionAuthentication",
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": (
@@ -140,10 +141,11 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.AnonRateThrottle",
     ),
     "DEFAULT_THROTTLE_RATES": {
-        "user": os.getenv("API_USER_RATE", "1000/day"),
-        "anon": os.getenv("API_ANON_RATE", "100/day"),
+        "user": "1000/day",
+        "anon": "100/day",
     },
 }
+
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
@@ -167,8 +169,8 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
 
 CSRF_TRUSTED_ORIGINS = [
-    "http://localhost",
-    "http://127.0.0.1",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
 ]
 
 

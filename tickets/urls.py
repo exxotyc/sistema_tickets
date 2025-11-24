@@ -18,6 +18,7 @@ from .views import (
     CommentViewSet,
     AttachmentViewSet,
     PriorityViewSet,
+    AreaViewSet,
 )
 
 # ============================================================
@@ -32,6 +33,8 @@ router.register(r"users", UserViewSet, basename="users")
 router.register(r"comments", CommentViewSet, basename="comments")
 router.register(r"attachments", AttachmentViewSet, basename="attachments")
 router.register(r"priorities", PriorityViewSet, basename="priorities")  # ← API Prioridades OK
+router.register(r"areas", AreaViewSet, basename="areas")
+
 
 api_urlpatterns = [
     # JWT
@@ -134,6 +137,11 @@ web_urlpatterns = [
     path("sistema/auth-failed/", views.sistema_auth_failed, name="sistema_auth_failed"),
     path("sistema/mantenimiento-tickets/", views.sistema_ticket_maintenance, name="sistema_ticket_maintenance"),
     path("sistema/health/", views.sistema_health, name="sistema_health"),
+
+    # Area
+    path("mantenedor/areas/", views.maint_areas, name="maint_areas"),
+
+
     
 ]
 

@@ -51,7 +51,6 @@
 <body>
 
 {% if request.user.is_authenticated %}
-    <!-- FAB notificaciones -->
     <button id="btnNotif" class="btn btn-primary notif-fab btn-ripple">
         <i class="bi bi-bell"></i>
         <span id="notifCount" class="badge text-bg-danger notif-badge d-none">0</span>
@@ -88,73 +87,52 @@
             <ul class="navbar-nav me-auto mb-2">
 
                 {% if request.user.is_authenticated %}
-                    <li class="nav-item">
-                        <a class="nav-link" href="{% url 'dashboard' %}">
-                            <i class="bi bi-speedometer2 me-1"></i> Dashboard
-                        </a>
-                    </li>
+                    <li class="nav-item"><a class="nav-link" href="{% url 'dashboard' %}">
+                        <i class="bi bi-speedometer2 me-1"></i> Dashboard
+                    </a></li>
 
                     {% if is_admin or is_tecnico %}
-                    <li class="nav-item">
-                        <a class="nav-link" href="{% url 'metrics_page' %}" data-hard-nav="1">
-                            <i class="bi bi-graph-up me-1"></i> Métricas
-                        </a>
+                    <li class="nav-item"><a class="nav-link" href="{% url 'metrics_page' %}">
+                        <i class="bi bi-graph-up me-1"></i> Métricas </a>
                     </li>
                     {% endif %}
 
-                    <li class="nav-item">
-                        <a class="nav-link" href="{% url 'ticket_list' %}" data-hard-nav="1">
-                            <i class="bi bi-list-ul me-1"></i> Listado
-                        </a>
-                    </li>
+                    <li class="nav-item"><a class="nav-link" href="{% url 'ticket_list' %}">
+                        <i class="bi bi-list-ul me-1"></i> Listado 
+                    </a></li>
 
-                    <!-- ✅ FAQ agregado correctamente -->
-                    <li class="nav-item">
-                        <a class="nav-link" href="{% url 'faq' %}">
-                            <i class="bi bi-question-circle me-1"></i> FAQ
-                        </a>
-                    </li>
+                    <li class="nav-item"><a class="nav-link" href="{% url 'faq' %}">
+                        <i class="bi bi-question-circle me-1"></i> FAQ
+                    </a></li>
+
                     {% if is_tecnico %}
-                      <li class="nav-item">
-                        <a class="nav-link" href="{% url 'ticket_list_assigned' %}">Mis Tickets</a>
-                      </li>
-                      <li class="nav-item">
-                        <a class="nav-link" href="{% url 'ticket_list_all' %}">Todos los Tickets</a>
-                      </li>
+                      <li class="nav-item"><a class="nav-link" href="{% url 'ticket_list_assigned' %}">Mis Tickets</a></li>
+                      <li class="nav-item"><a class="nav-link" href="{% url 'ticket_list_all' %}">Todos los Tickets</a></li>
                     {% endif %}
 
                     {% if is_admin or is_tecnico %}
-                    <li class="nav-item">
-                        <a class="nav-link" href="{% url 'reports_page' %}">
-                            <i class="bi bi-file-bar-graph me-1"></i> Reportes
-                        </a>
-                    </li>
+                    <li class="nav-item"><a class="nav-link" href="{% url 'reports_page' %}">
+                        <i class="bi bi-file-bar-graph me-1"></i> Reportes
+                    </a></li>
                     {% endif %}
 
                     {% if is_admin and maint_sections %}
                     <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
+                        <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#">
                             <i class="bi bi-gear-wide-connected me-1"></i> Mantenedor
                         </a>
-
                         <ul class="dropdown-menu">
                             {% for s in maint_sections %}
-                            <li>
-                                <a class="dropdown-item" href="{% url 'maint_section' s.code %}">
-                                    {{ s.title }}
-                                </a>
-                            </li>
+                            <li><a class="dropdown-item" href="{% url 'maint_section' s.code %}">{{ s.title }}</a></li>
                             {% endfor %}
                             <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item" href="{% url 'maint_index' %}">Ver todas</a></li>
                         </ul>
                     </li>
 
-                    <li class="nav-item">
-                        <a class="nav-link" href="{% url 'sistema_page' %}">
-                            <i class="bi bi-hdd-network me-1"></i> Sistema
-                        </a>
-                    </li>
+                    <li class="nav-item"><a class="nav-link" href="{% url 'sistema_page' %}">
+                        <i class="bi bi-hdd-network me-1"></i> Sistema
+                    </a></li>
                     {% endif %}
 
                 {% endif %}
@@ -198,7 +176,8 @@
 
 <script>
 document.addEventListener("pointerdown",(e)=>{
-    const btn=e.target.closest(".btn-ripple"); if(!btn) return;
+    const btn=e.target.closest(".btn-ripple");
+    if(!btn) return;
     const r=btn.getBoundingClientRect();
     btn.style.setProperty("--x",(e.clientX-r.left)+"px");
     btn.style.setProperty("--y",(e.clientY-r.top)+"px");
@@ -206,44 +185,57 @@ document.addEventListener("pointerdown",(e)=>{
 </script>
 
 {% if request.user.is_authenticated %}
-<!-- ===============================
-     AUTH / TOKENS / API FETCH
-=============================== -->
 <script>
+/* ============================================================================
+        JWT + CSRF + SESSION TOKEN
+============================================================================ */
+
 function getCookie(name){
     const m=document.cookie.match('(^|;)\\s*'+name+'\\s*=\\s*([^;]+)');
     return m ? m.pop() : "";
 }
 
-// --- refrescar token ---
+
+/* =====================================================
+   REFRESH TOKEN
+===================================================== */
 async function refreshToken(){
     const refresh = localStorage.getItem("refresh_token");
     if(!refresh) return null;
 
     const r = await fetch("/api/token/refresh/", {
         method:"POST",
-        headers:{ "Content-Type":"application/json" },
+        credentials:"include",
+        headers:{
+            "Content-Type":"application/json",
+            "X-CSRFToken": getCookie("csrftoken"),
+        },
         body: JSON.stringify({ refresh })
     });
 
     if(!r.ok) return null;
+
     const data = await r.json();
     localStorage.setItem("access_token", data.access);
     return data.access;
 }
 
-// --- fetch global ---
-async function apiFetch(url, options={}){
-    options.headers = options.headers || {};
 
-    const token = localStorage.getItem("access_token");
-    if(token){
-        options.headers["Authorization"] = "Bearer " + token;
+/* =====================================================
+   GLOBAL FETCH (con JWT)
+===================================================== */
+async function apiFetch(url, options = {}){
+    options.headers = options.headers || {};
+    options.credentials = "include";
+
+    const access = localStorage.getItem("access_token");
+    if(access){
+        options.headers["Authorization"] = "Bearer " + access;
     }
 
-    if(!options.headers["Content-Type"] &&
-       ["POST","PUT","PATCH"].includes(options.method)){
+    if(["POST","PUT","PATCH","DELETE"].includes(options.method)){
         options.headers["Content-Type"] = "application/json";
+        options.headers["X-CSRFToken"] = getCookie("csrftoken");
     }
 
     let response = await fetch(url, options);
@@ -255,24 +247,30 @@ async function apiFetch(url, options={}){
             response = await fetch(url, options);
         }
     }
-
     return response;
 }
 
-// --- crear token si no existe ---
+
+/* =====================================================
+   CREAR TOKEN DESPUÉS DEL LOGIN (SI NO EXISTE)
+===================================================== */
 (async ()=>{
     const user = "{{ request.user.username }}";
     const stored = localStorage.getItem("username");
 
+    // Si el usuario cambió, borrar todo
     if(stored && stored !== user){
         localStorage.clear();
     }
 
+    // Si no existe token, crearlo
     if(!localStorage.getItem("access_token")){
         const r = await fetch("{% url 'api:token_session' %}", {
             method:"POST",
+            credentials:"include",
             headers:{ "X-CSRFToken": getCookie("csrftoken") }
         });
+
         if(r.ok){
             const data = await r.json();
             localStorage.setItem("access_token", data.access);

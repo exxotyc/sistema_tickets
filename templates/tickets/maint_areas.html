@@ -1,0 +1,325 @@
+{% extends "tickets/base.html" %}
+{% block title %}Áreas · Mantenedor{% endblock %}
+
+{% block extra_head %}
+<style>
+  .glass{
+    background:rgba(255,255,255,.92);
+    backdrop-filter:blur(6px);
+    border:1px solid rgba(15,23,42,.06);
+    border-radius:1rem;
+  }
+  .fade-in{animation:fadeIn .3s ease;}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .table-hover tbody tr:hover{background:#f8fafc;}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="glass p-3 p-md-4 fade-in">
+
+  <!-- HEADER -->
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h5 m-0 d-flex align-items-center gap-2">
+      <i class="bi bi-grid"></i> Áreas
+    </h1>
+
+    <div class="d-flex gap-2">
+      <button id="btnNew" class="btn btn-primary btn-sm btn-ripple">
+        <i class="bi bi-plus-lg me-1"></i> Nuevo
+      </button>
+      <button id="btnReload" class="btn btn-outline-secondary btn-sm btn-ripple">
+        <i class="bi bi-arrow-clockwise"></i>
+      </button>
+      <a href="{% url 'maint_index' %}" class="btn btn-outline-secondary btn-sm btn-ripple">Volver</a>
+    </div>
+  </div>
+
+  <!-- BUSCADOR -->
+  <div class="input-group mb-3">
+    <span class="input-group-text"><i class="bi bi-search"></i></span>
+    <input id="q" class="form-control" placeholder="Buscar área…">
+  </div>
+
+  <!-- MENSAJE GLOBAL -->
+  <div id="globalMsg" class="alert d-none" role="alert"></div>
+
+  <!-- TABLA -->
+  <div class="table-responsive">
+    <table class="table table-hover align-middle">
+      <thead class="table-light">
+        <tr>
+          <th style="width:70px">ID</th>
+          <th>Nombre</th>
+          <th class="text-end" style="width:160px;">Acciones</th>
+        </tr>
+      </thead>
+      <tbody id="rows">
+        <tr><td colspan="3" class="text-center text-muted py-4">Cargando…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<!-- MODAL -->
+<div class="modal fade" id="areaModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form id="areaForm">
+        <div class="modal-header">
+          <h5 class="modal-title" id="modalTitle">Nueva Área</h5>
+          <button class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+
+        <div class="modal-body">
+          <div id="formAlert" class="alert alert-danger small d-none mb-2"></div>
+
+          <div class="mb-3">
+            <label class="form-label">Nombre</label>
+            <input id="f_name" class="form-control" required>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn btn-outline-secondary btn-ripple" data-bs-dismiss="modal">Cancelar</button>
+          <button class="btn btn-primary btn-ripple" id="saveBtn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function(){
+
+  // ---------------------------
+  // Helper apiFetch
+  // ---------------------------
+  if(typeof window.apiFetch!=="function"){
+    window.apiFetch = async function(url, opts={}){
+      const access = localStorage.getItem("access_token")
+      const finalUrl = url.startsWith("http") ? url : "/api" + url
+
+      const r = await fetch(finalUrl, {
+        ...opts,
+        headers:{
+          ...(opts.headers||{}),
+          Authorization:"Bearer "+access
+        }
+      })
+
+      if(r.status !== 401) return r
+
+      // Refresh
+      const refresh = localStorage.getItem("refresh_token")
+      if(!refresh) { localStorage.clear(); location.href="{% url 'login' %}"; return null }
+
+      const rr = await fetch("/api/token/refresh/", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ refresh })
+      })
+
+      if(!rr.ok){ localStorage.clear(); location.href="{% url 'login' %}"; return null }
+
+      const data = await rr.json()
+      localStorage.setItem("access_token", data.access)
+
+      return fetch(finalUrl, {
+        ...opts,
+        headers:{ ...(opts.headers||{}), Authorization:"Bearer "+data.access }
+      })
+    }
+  }
+
+  // ---------------------------
+  // DOM ELEMENTS
+  // ---------------------------
+  const rows = document.getElementById("rows")
+  const q = document.getElementById("q")
+  const globalMsg = document.getElementById("globalMsg")
+  const btnNew = document.getElementById("btnNew")
+  const btnReload = document.getElementById("btnReload")
+
+  const modalEl = document.getElementById("areaModal")
+  const modal = new bootstrap.Modal(modalEl)
+
+  const form = document.getElementById("areaForm")
+  const formAlert = document.getElementById("formAlert")
+  const modalTitle = document.getElementById("modalTitle")
+  const saveBtn = document.getElementById("saveBtn")
+  const f_name = document.getElementById("f_name")
+
+  let allAreas = []
+  let currentId = null
+
+  // ---------------------------
+  // Helpers
+  // ---------------------------
+  function showMsg(text, ok){
+    globalMsg.textContent = text
+    globalMsg.className = "alert " + (ok ? "alert-success" : "alert-danger")
+    globalMsg.classList.remove("d-none")
+    setTimeout(()=>globalMsg.classList.add("d-none"), 2000)
+  }
+
+  function showFormError(text){
+    formAlert.textContent = text
+    formAlert.classList.remove("d-none")
+  }
+  function hideFormError(){
+    formAlert.classList.add("d-none")
+  }
+
+  function esc(s){
+    return String(s||"").replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[m]))
+  }
+
+  // ---------------------------
+  // Render
+  // ---------------------------
+  function render(list){
+    if(list.length === 0){
+      rows.innerHTML = `<tr><td colspan="3" class="text-center text-muted py-4">Sin áreas</td></tr>`
+      return
+    }
+
+    rows.innerHTML = ""
+    list.forEach(a=>{
+      const tr = document.createElement("tr")
+      tr.dataset.id = a.id
+      tr.innerHTML = `
+        <td>${a.id}</td>
+        <td>${esc(a.name)}</td>
+        <td class="text-end">
+          <button class="btn btn-outline-primary btn-sm btn-ripple me-1" data-action="edit">
+            <i class="bi bi-pencil"></i>
+          </button>
+          <button class="btn btn-outline-danger btn-sm btn-ripple" data-action="del">
+            <i class="bi bi-trash"></i>
+          </button>
+        </td>
+      `
+      rows.appendChild(tr)
+    })
+  }
+
+  function applyFilter(){
+    const term = (q.value||"").toLowerCase()
+    if(!term) return render(allAreas)
+    render(allAreas.filter(a => a.name.toLowerCase().includes(term)))
+  }
+
+// ---------------------------
+// API
+// ---------------------------
+async function loadAreas(){
+  rows.innerHTML = `<tr><td colspan="3" class="text-center text-muted py-4">Cargando…</td></tr>`
+  const r = await apiFetch("/api/areas/")
+  if(!r) return
+  const data = await r.json()
+  allAreas = Array.isArray(data) ? data : data.results || []
+  applyFilter()
+}
+
+async function createArea(payload){
+  const r = await apiFetch("/api/areas/", {
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify(payload)
+  })
+  const j = await r.json().catch(()=>{})
+  return { ok:r.ok, data:j, error:j?.detail || j?.error }
+}
+
+async function updateArea(id, payload){
+  const r = await apiFetch(`/api/areas/${id}/`, {
+    method:"PUT",
+    headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify(payload)
+  })
+  const j = await r.json().catch(()=>{})
+  return { ok:r.ok, data:j, error:j?.detail }
+}
+
+async function deleteArea(id){
+  const r = await apiFetch(`/api/areas/${id}/`, { method:"DELETE" })
+  if(r.status === 204) return { ok:true }
+  const j = await r.json().catch(()=>{})
+  return { ok:r.ok, error:j?.detail }
+}
+
+
+  // ---------------------------
+  // Eventos
+  // ---------------------------
+  q.addEventListener("input", applyFilter)
+
+  btnReload.addEventListener("click", loadAreas)
+
+  btnNew.addEventListener("click", ()=>{
+    currentId = null
+    form.reset()
+    hideFormError()
+    modalTitle.textContent = "Nueva Área"
+    modal.show()
+  })
+
+  rows.addEventListener("click", async ev=>{
+    const btn = ev.target.closest("button[data-action]")
+    if(!btn) return
+    const id = Number(btn.closest("tr").dataset.id)
+    const area = allAreas.find(a => a.id === id)
+    if(!area) return
+
+    if(btn.dataset.action === "edit"){
+      currentId = id
+      hideFormError()
+      f_name.value = area.name
+      modalTitle.textContent = "Editar Área"
+      modal.show()
+    }
+    else if(btn.dataset.action === "del"){
+      if(!confirm(`¿Eliminar área "${area.name}"?`)) return
+      const res = await deleteArea(id)
+      if(!res.ok) return showMsg(res.error || "No se pudo eliminar", false)
+      showMsg("Área eliminada", true)
+      loadAreas()
+    }
+  })
+
+  form.addEventListener("submit", async ev=>{
+    ev.preventDefault()
+    hideFormError()
+    saveBtn.disabled = true
+
+    const payload = {
+      name: f_name.value.trim(),
+    }
+
+    const res = currentId
+      ? await updateArea(currentId, payload)
+      : await createArea(payload)
+
+    saveBtn.disabled = false
+
+    if(!res.ok){
+      showFormError(res.error || "Error al guardar.")
+      return
+    }
+
+    modal.hide()
+    showMsg(currentId ? "Área actualizada" : "Área creada", true)
+    loadAreas()
+  })
+
+  // Init
+  loadAreas()
+
+})();
+</script>
+{% endblock %}

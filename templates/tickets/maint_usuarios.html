@@ -12,19 +12,24 @@
 {% endblock %}
 
 {% block content %}
+
 <div class="glass p-3 p-md-4 fade-in">
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h5 m-0 d-flex align-items-center gap-2"><i class="bi bi-people"></i> Usuarios</h1>
     <div class="d-flex gap-2">
-      <button id="btnNew" class="btn btn-primary btn-sm btn-ripple"><i class="bi bi-plus-lg me-1"></i>Nuevo</button>
-      <button id="btnReload" class="btn btn-outline-secondary btn-sm btn-ripple"><i class="bi bi-arrow-clockwise me-1"></i>Recargar</button>
+      <button id="btnNew" class="btn btn-primary btn-sm btn-ripple">
+        <i class="bi bi-plus-lg me-1"></i>Nuevo
+      </button>
+      <button id="btnReload" class="btn btn-outline-secondary btn-sm btn-ripple">
+        <i class="bi bi-arrow-clockwise me-1"></i>Recargar
+      </button>
       <a class="btn btn-outline-secondary btn-sm btn-ripple" href="{% url 'maint_index' %}">Volver</a>
     </div>
   </div>
 
   <div class="input-group mb-3">
     <span class="input-group-text"><i class="bi bi-search"></i></span>
-    <input id="q" class="form-control" placeholder="Buscar usuario, correo o rol…">
+    <input id="q" class="form-control" placeholder="Buscar usuario, correo, rol o área…">
   </div>
 
   <div id="globalMsg" class="alert d-none" role="alert"></div>
@@ -37,6 +42,7 @@
         <th>Usuario</th>
         <th>Nombre</th>
         <th>Correo</th>
+        <th>Área</th>
         <th style="width:110px">Activo</th>
         <th style="width:110px">Staff</th>
         <th style="width:260px">Roles</th>
@@ -44,117 +50,158 @@
       </tr>
       </thead>
       <tbody id="rows">
-        <tr><td colspan="8" class="text-center text-muted py-4">Cargando…</td></tr>
+        <tr><td colspan="9" class="text-center text-muted py-4">Cargando…</td></tr>
       </tbody>
     </table>
   </div>
 
   <div class="alert alert-info mt-3">
-    Recuerda: <strong>admin</strong> y <strong>técnico</strong> no pueden coexistir en un mismo usuario.
-    Debe quedar al menos <strong>un admin</strong> en el sistema.
+    Recuerda: <strong>admin</strong> y <strong>técnico</strong> no pueden coexistir.  
+    Técnicos y solicitantes <strong>DEBEN</strong> tener área.  
+    Admin puede tener área o dejarla vacía.
   </div>
 </div>
 
-<!-- Contexto RBAC desde la vista maint_section -->
+<!-- CONTEXTO RBAC -->
 <div id="rbacInfo"
-     data-allowed='{{ allowed_roles_json|default:"[]"|escapejs }}'
-     data-role-options='{{ role_options_json|default:"[]"|escapejs }}'
+     data-allowed='{{ allowed_roles_json|safe }}'
+     data-role-options='{{ role_options_json|safe }}'
      data-can-staff='{{ can_manage_staff|yesno:"true,false" }}'
      hidden></div>
 
-<!-- Modal crear/editar -->
-<div class="modal fade" id="userModal" tabindex="-1" aria-hidden="true">
+<!-- MODAL -->
+<div class="modal fade" id="userModal" tabindex="-1">
   <div class="modal-dialog modal-lg modal-dialog-centered">
     <div class="modal-content">
       <form id="userForm">
         <div class="modal-header">
           <h5 class="modal-title" id="modalTitle">Nuevo usuario</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
+
         <div class="modal-body">
           <div id="formAlert" class="alert alert-danger d-none small"></div>
+
           <div class="row g-3">
+
             <div class="col-md-6">
               <label class="form-label">Usuario</label>
-              <input id="f_username" type="text" class="form-control" required>
+              <input id="f_username" type="text" class="form-control" required autocomplete="username">
             </div>
+
             <div class="col-md-6">
               <label class="form-label">Correo</label>
-              <input id="f_email" type="email" class="form-control" placeholder="usuario@ejemplo.cl">
+              <input id="f_email" type="email" class="form-control">
             </div>
+
             <div class="col-md-6">
               <label class="form-label">Nombre</label>
               <input id="f_first_name" type="text" class="form-control">
             </div>
+
             <div class="col-md-6">
               <label class="form-label">Apellido</label>
               <input id="f_last_name" type="text" class="form-control">
             </div>
+
             <div class="col-md-6">
               <label class="form-label">Contraseña</label>
-              <input id="f_password" type="password" class="form-control" autocomplete="new-password">
-              <div class="form-text">Dejar en blanco para mantener (en edición).</div>
+              <input id="f_password" type="password" class="form-control" autocomplete="current-password">
             </div>
+
             <div class="col-md-6">
               <div class="form-check form-switch mt-4">
                 <input class="form-check-input" type="checkbox" id="f_active" checked>
                 <label class="form-check-label" for="f_active">Usuario activo</label>
               </div>
+
               {% if can_manage_staff %}
               <div class="form-check form-switch mt-2">
                 <input class="form-check-input" type="checkbox" id="f_staff">
                 <label class="form-check-label" for="f_staff">Staff</label>
               </div>
-              {% else %}
-              <div class="form-text text-muted">No tienes permisos para cambiar “staff”.</div>
               {% endif %}
             </div>
-            <div class="col-12">
+
+            <div class="col-md-6">
+              <label class="form-label">Área</label>
+              <select id="f_area" class="form-select">
+                <option value="">(Sin área asignada)</option>
+              </select>
+              <div class="form-text">Obligatoria para técnicos y solicitantes.</div>
+            </div>
+
+            <div class="col-md-6">
               <label class="form-label">Roles</label>
               <div id="roleChecks" class="d-flex flex-wrap gap-3"></div>
-              <div class="form-text">admin y técnico son excluyentes.</div>
             </div>
+
           </div>
         </div>
+
         <div class="modal-footer">
           <button type="button" class="btn btn-outline-secondary btn-ripple" data-bs-dismiss="modal">Cancelar</button>
           <button type="submit" class="btn btn-primary btn-ripple" id="saveBtn">Guardar</button>
         </div>
+
       </form>
     </div>
   </div>
 </div>
+
 {% endblock %}
 
 {% block extra_js %}
 <script>
-(function(){
-  // ----- Helpers JWT -> apiFetch (igual que en otras páginas) -----
-  if(typeof window.apiFetch!=="function"){
-    window.apiFetch = async function(url, opts={}){
-      const access = localStorage.getItem("access_token");
-      const finalUrl = url.startsWith("http") ? url : url.startsWith("/api") ? url : "/api"+url;
-      const r = await fetch(finalUrl, { ...opts, headers:{...(opts.headers||{}), Authorization:"Bearer "+access }});
-      if(r.status !== 401) return r;
-      const refresh = localStorage.getItem("refresh_token");
-      if(!refresh){ localStorage.clear(); location.assign("{% url 'login' %}"); return null; }
-      const rr = await fetch("/api/token/refresh/", {
-        method:"POST", headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ refresh })
-      });
-      if(!rr.ok){ localStorage.clear(); location.assign("{% url 'login' %}"); return null; }
-      const data = await rr.json();
-      localStorage.setItem("access_token", data.access);
-      return fetch(finalUrl, { ...opts, headers:{...(opts.headers||{}), Authorization:"Bearer "+data.access }});
+
+console.log("[maint_usuarios] script cargado");
+
+/* ============================================================
+   API FETCH GLOBAL (JWT)
+============================================================ */
+async function apiFetch(url, options = {}){
+    options.headers = options.headers || {};
+    options.credentials = "include";
+
+    // JWT
+    const token = localStorage.getItem("access_token");
+    if(token){
+        options.headers["Authorization"] = "Bearer " + token;
     }
+
+    // CSRF — SOLO para métodos que escriben
+    const csrf = document.cookie
+        .split("; ")
+        .find(r => r.startsWith("csrftoken="))
+        ?.split("=")[1];
+
+    if (csrf && ["POST","PUT","PATCH","DELETE"].includes((options.method||"GET").toUpperCase())) {
+        options.headers["X-CSRFToken"] = csrf;
+        options.headers["Content-Type"] = "application/json";
+    }
+
+    return fetch(url, options);
+}
+
+
+/* ============================================================
+   SCRIPT PRINCIPAL
+============================================================ */
+
+(function(){
+
+  console.log("[maint_usuarios] init");
+
+  function esc(s){
+    return String(s||"").replace(/[&<>"']/g, m => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[m]));
   }
 
-  // ----- DOM -----
   const rows = document.getElementById("rows");
   const q = document.getElementById("q");
   const btnNew = document.getElementById("btnNew");
   const btnReload = document.getElementById("btnReload");
-  const globalMsg = document.getElementById("globalMsg");
 
   const modalEl = document.getElementById("userModal");
   const modal = new bootstrap.Modal(modalEl);
@@ -163,284 +210,266 @@
   const modalTitle = document.getElementById("modalTitle");
   const saveBtn = document.getElementById("saveBtn");
 
-  const f_username   = document.getElementById("f_username");
-  const f_email      = document.getElementById("f_email");
+  const f_username = document.getElementById("f_username");
+  const f_email = document.getElementById("f_email");
   const f_first_name = document.getElementById("f_first_name");
-  const f_last_name  = document.getElementById("f_last_name");
-  const f_password   = document.getElementById("f_password");
-  const f_active     = document.getElementById("f_active");
-  const f_staff      = document.getElementById("f_staff");
-  const roleChecks   = document.getElementById("roleChecks");
+  const f_last_name = document.getElementById("f_last_name");
+  const f_password = document.getElementById("f_password");
+  const f_active = document.getElementById("f_active");
+  const f_staff = document.getElementById("f_staff");
+  const f_area = document.getElementById("f_area");
+  const roleChecks = document.getElementById("roleChecks");
 
-  // ----- RBAC context -----
   const infoEl = document.getElementById("rbacInfo");
-  const allowedRoles = JSON.parse(infoEl?.dataset.allowed || "[]"); // qué roles puedo asignar yo
-  const roleOptions  = JSON.parse(infoEl?.dataset.roleOptions || "[]"); // [{code,label}]
-  const canManageStaff = (infoEl?.dataset.canStaff === "true");
-  const allowedSet = new Set(allowedRoles);
+  const allowedRoles = JSON.parse(infoEl.dataset.allowed || "[]");
+  const roleOptions = JSON.parse(infoEl.dataset.roleOptions || "[]");
+  const canManageStaff = infoEl.dataset.canStaff === "true";
 
-  // ----- Estado -----
   let allUsers = [];
+  let areaList = [];
   let currentId = null;
 
-  // ----- UI helpers -----
-  function esc(s){return String(s||"").replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));}
-  function setGlobalMsg(text, ok){
-    if(!text){ globalMsg.classList.add("d-none"); return; }
-    globalMsg.className = "alert "+(ok?"alert-success":"alert-danger");
-    globalMsg.textContent = text;
-    globalMsg.classList.remove("d-none");
-    setTimeout(()=>globalMsg.classList.add("d-none"), 2500);
-  }
-  function showFormError(text){
-    formAlert.textContent = text || "Error desconocido";
-    formAlert.classList.remove("d-none");
-  }
-  function hideFormError(){ formAlert.classList.add("d-none"); formAlert.textContent = ""; }
+  function hideFormError(){ formAlert.classList.add("d-none"); }
+  function showFormError(msg){ formAlert.textContent = msg; formAlert.classList.remove("d-none"); }
 
+  /* ============================================================
+      CARGAR ÁREAS
+  ============================================================ */
+  async function loadAreas(){
+    const r = await apiFetch("/api/areas/");
+    const data = await r.json();
+    areaList = data;
+
+    f_area.innerHTML = '<option value="">(Sin área asignada)</option>';
+    areaList.forEach(a=>{
+      const opt = document.createElement("option");
+      opt.value = a.id;
+      opt.textContent = a.name;
+      f_area.appendChild(opt);
+    });
+  }
+
+  /* ============================================================
+      CARGAR USUARIOS
+  ============================================================ */
+  async function loadUsers(){
+    rows.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">Cargando…</td></tr>';
+
+    const r = await apiFetch("/mantenedor/usuarios/data/");
+    const data = await r.json();
+
+    allUsers = data.users || [];
+    render(allUsers);
+  }
+
+  /* ============================================================
+      RENDER TABLA
+  ============================================================ */
+  function render(list){
+    if(!list || !list.length){
+      rows.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">Sin usuarios</td></tr>';
+      return;
+    }
+
+    rows.innerHTML = "";
+
+    list.forEach(u=>{
+      const name = `${u.full_name || ""}`;
+      const roles = u.roles.map(r=> `<span class="badge text-bg-light me-1 tag">${r}</span>`).join("");
+
+      const tr = document.createElement("tr");
+      tr.dataset.id = u.id;
+
+      tr.innerHTML = `
+        <td>${u.id}</td>
+        <td><strong>${u.username}</strong></td>
+        <td>${name || "—"}</td>
+        <td>${u.email || "—"}</td>
+        <td>${u.area_name || "—"}</td>
+        <td>${u.is_active ? "Sí":"No"}</td>
+        <td>${u.is_staff ? "Sí":"No"}</td>
+        <td>${roles || "—"}</td>
+        <td class="text-end">
+          <button class="btn btn-outline-primary btn-sm" data-action="edit"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-outline-danger btn-sm" data-action="del"><i class="bi bi-trash"></i></button>
+        </td>
+      `;
+
+      rows.appendChild(tr);
+    });
+  }
+
+  /* ============================================================
+      FILTRO DE BÚSQUEDA
+  ============================================================ */
+  q.addEventListener("input", ()=>{
+    const t = q.value.toLowerCase();
+    const filtered = allUsers.filter(u =>
+      u.username.toLowerCase().includes(t) ||
+      (u.email||"").toLowerCase().includes(t) ||
+      (u.full_name||"").toLowerCase().includes(t) ||
+      (u.area_name||"").toLowerCase().includes(t)
+    );
+    render(filtered);
+  });
+
+  /* ============================================================
+      CLICK EN EL LISTADO
+  ============================================================ */
+  rows.addEventListener("click", async ev=>{
+    const btn = ev.target.closest("button[data-action]");
+    if(!btn) return;
+
+    const id = btn.closest("tr").dataset.id;
+    const user = allUsers.find(u=>u.id==id);
+
+    if(btn.dataset.action==="edit"){
+      openModal("edit", user);
+    }
+  });
+
+  /* ============================================================
+      CLICK NUEVO USUARIO
+  ============================================================ */
+  btnNew.addEventListener("click", ()=>{
+    openModal("create", null);
+  });
+
+  /* ============================================================
+      ABRIR MODAL (EDITAR / CREAR)
+  ============================================================ */
+  function openModal(mode, user){
+    form.reset();
+    hideFormError();
+    currentId = null;
+    f_password.value = "";
+
+    if(mode === "edit" && user){
+      modalTitle.textContent = "Editar usuario";
+      currentId = user.id;
+
+      f_username.value = user.username;
+      f_email.value = user.email;
+      f_first_name.value = user.full_name.split(" ")[0] || "";
+      f_last_name.value = user.full_name.split(" ")[1] || "";
+      f_active.checked = user.is_active;
+
+      if(f_staff) f_staff.checked = user.is_staff;
+
+      f_area.value = user.area_id || "";
+
+      buildRoleInputs(user.roles);
+    }
+    else {
+      modalTitle.textContent = "Nuevo usuario";
+
+      buildRoleInputs([]);
+      f_active.checked = true;
+
+      if(f_staff) f_staff.checked = false;
+      f_area.value = "";
+    }
+
+    modal.show();
+  }
+
+  /* ============================================================
+      ROLES
+  ============================================================ */
   function buildRoleInputs(selected){
     roleChecks.innerHTML = "";
-    const selectedSet = new Set(selected||[]);
+    const sel = new Set(selected || []);
+
     roleOptions.forEach(opt=>{
       const wrap = document.createElement("div");
       wrap.className = "form-check";
+
       const input = document.createElement("input");
       input.type = "checkbox";
       input.className = "form-check-input";
       input.id = "role_"+opt.code;
       input.value = opt.code;
-      input.checked = selectedSet.has(opt.code);
-
-      const canAssign = allowedSet.has(opt.code);
-      input.dataset.locked = canAssign ? "0" : "1";
-      if(!canAssign){
-        input.disabled = !input.checked; // si ya lo tenía, permitir verlo marcado pero bloqueado
-        wrap.classList.add("text-muted");
-        input.title = "No tienes permiso para asignar este rol.";
-      }
-      input.addEventListener("change", enforceExclusion);
+      input.checked = sel.has(opt.code);
+      wrap.appendChild(input);
 
       const label = document.createElement("label");
+      label.textContent = opt.label;
       label.className = "form-check-label";
-      label.setAttribute("for", input.id);
-      label.textContent = opt.label || opt.code;
+      label.setAttribute("for",input.id);
+      wrap.appendChild(label);
 
-      wrap.appendChild(input); wrap.appendChild(label);
       roleChecks.appendChild(wrap);
     });
-    enforceExclusion();
   }
 
-  function enforceExclusion(){
-    const admin = document.getElementById("role_admin");
-    const tec   = document.getElementById("role_tecnico");
-    if(!admin || !tec) return;
-
-    // Si alguno está bloqueado por permiso, que permanezca como está.
-    const aLocked = admin?.dataset.locked === "1";
-    const tLocked = tec?.dataset.locked === "1";
-
-    if(admin.checked){
-      tec.checked = false;
-      if(!tLocked) tec.disabled = true;  // evitar selección simultánea
-    }else if(!tLocked){
-      tec.disabled = false;
-    }
-
-    if(tec.checked){
-      admin.checked = false;
-      if(!aLocked) admin.disabled = true;
-    }else if(!aLocked){
-      admin.disabled = false;
-    }
-  }
-
-  function collectRoles(){
-    return Array.from(roleChecks.querySelectorAll("input[type=checkbox]:checked")).map(i=>i.value);
-  }
-
-  function openModal(mode, user){
-    currentId = (mode==="edit" && user) ? user.id : null;
-    hideFormError();
-    form.reset();
-    f_password.value = "";
-    f_password.required = currentId === null;
-    f_active.checked = true;
-    if(f_staff) f_staff.checked = false;
-
-    if(currentId){
-      modalTitle.textContent = "Editar usuario";
-      f_username.value = user.username || "";
-      f_email.value = user.email || "";
-      f_first_name.value = user.first_name || "";
-      f_last_name.value = user.last_name || "";
-      f_active.checked = user.is_active !== false;
-      if(f_staff){ f_staff.checked = !!user.is_staff; }
-      buildRoleInputs(user.roles || []);
-    }else{
-      modalTitle.textContent = "Nuevo usuario";
-      buildRoleInputs([]);
-    }
-    modal.show();
-  }
-
-  function render(list){
-    if(!list.length){
-      rows.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">Sin usuarios</td></tr>';
-      return;
-    }
-    rows.innerHTML = "";
-    list.forEach(u=>{
-      const name = [u.first_name,u.last_name].filter(Boolean).join(" ").trim();
-      const roles = (u.roles||[]).map(r=>`<span class="badge text-bg-light me-1 tag">${esc(r)}</span>`).join("") || '<span class="text-muted">—</span>';
-      const tr = document.createElement("tr");
-      tr.dataset.id = u.id;
-      tr.innerHTML = `
-        <td>${u.id}</td>
-        <td><strong>${esc(u.username||"-")}</strong></td>
-        <td>${name?esc(name):'<span class="text-muted">—</span>'}</td>
-        <td>${u.email?esc(u.email):'<span class="text-muted">—</span>'}</td>
-        <td>${u.is_active!==false?'<span class="badge text-bg-success tag">Sí</span>':'<span class="badge text-bg-secondary tag">No</span>'}</td>
-        <td>${u.is_staff?'<span class="badge text-bg-primary tag">Sí</span>':'<span class="badge text-bg-secondary tag">No</span>'}</td>
-        <td class="roles-cell">${roles}</td>
-        <td class="text-end">
-          <button class="btn btn-outline-primary btn-sm btn-ripple me-1" data-action="edit"><i class="bi bi-pencil"></i></button>
-          <button class="btn btn-outline-danger btn-sm btn-ripple" data-action="del"><i class="bi bi-trash"></i></button>
-        </td>
-      `;
-      rows.appendChild(tr);
-    });
-  }
-
-  function applyFilter(){
-    const term = (q.value||"").toLowerCase();
-    if(!term) return render(allUsers);
-    const filtered = allUsers.filter(u=>{
-      const full = `${u.first_name||""} ${u.last_name||""}`.toLowerCase();
-      const roleStr = (u.roles||[]).join(" ").toLowerCase();
-      return (u.username||"").toLowerCase().includes(term)
-          || (u.email||"").toLowerCase().includes(term)
-          || full.includes(term)
-          || roleStr.includes(term);
-    });
-    render(filtered);
-  }
-
-  // ----- API calls -----
-  async function loadUsers(){
-    rows.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">Cargando…</td></tr>';
-    const r = await apiFetch("/api/users/");
-    if(!r){ return; }
-    if(r.status === 401){ setGlobalMsg("Sesión inválida.", false); return; }
-    const data = await r.json().catch(()=>[]);
-    allUsers = Array.isArray(data) ? data : (data.results || []);
-    applyFilter();
-  }
-
-  async function createUser(payload){
-    const r = await apiFetch("/api/users/", {
-      method:"POST",
-      headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify(payload)
-    });
-    if(!r) return { ok:false, error:"Sin respuesta" };
-    let j = {};
-    try{ j = await r.json(); }catch(_){}
-    if(!r.ok){
-      return { ok:false, error: j.detail || j.error || JSON.stringify(j) };
-    }
-    return { ok:true, data:j };
-  }
-
-  async function updateUser(id, payload){
-    const r = await apiFetch(`/api/users/${id}/`, {
-      method:"PUT",
-      headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify(payload)
-    });
-    if(!r) return { ok:false, error:"Sin respuesta" };
-    let j = {};
-    try{ j = await r.json(); }catch(_){}
-    if(!r.ok){
-      return { ok:false, error: j.detail || j.error || JSON.stringify(j) };
-    }
-    return { ok:true, data:j };
-  }
-
-  async function deleteUser(id){
-    const r = await apiFetch(`/api/users/${id}/`, { method:"DELETE" });
-    if(!r) return { ok:false, error:"Sin respuesta" };
-    if(r.status===204) return { ok:true };
-    let j = {};
-    try{ j = await r.json(); }catch(_){}
-    if(!r.ok){
-      return { ok:false, error: j.detail || j.error || JSON.stringify(j) };
-    }
-    return { ok:true };
-  }
-
-  // ----- Eventos -----
-  q.addEventListener("input", applyFilter);
-
-  btnNew.addEventListener("click", ()=> openModal("create"));
-
-  btnReload.addEventListener("click", loadUsers);
-
-  rows.addEventListener("click", async (ev)=>{
-    const btn = ev.target.closest("button[data-action]");
-    if(!btn) return;
-    const id = Number(btn.closest("tr")?.dataset.id);
-    const user = allUsers.find(u=>u.id===id);
-    if(!id || !user) return;
-
-    if(btn.dataset.action==="edit"){
-      openModal("edit", user);
-    }else if(btn.dataset.action==="del"){
-      if(!confirm(`¿Eliminar al usuario ${user.username}?`)) return;
-      const res = await deleteUser(id);
-      if(!res.ok){ setGlobalMsg(res.error || "No se pudo eliminar", false); return; }
-      setGlobalMsg("Usuario eliminado.", true);
-      await loadUsers();
-    }
-  });
-
-  form.addEventListener("submit", async (e)=>{
+  /* ============================================================
+      GUARDAR USUARIO
+  ============================================================ */
+  form.addEventListener("submit", async e=>{
     e.preventDefault();
     hideFormError();
-    const roles = collectRoles();
-    if(roles.includes("admin") && roles.includes("tecnico")){
-      showFormError("admin y técnico son excluyentes.");
-      return;
+
+    const roles = Array.from(roleChecks.querySelectorAll("input:checked")).map(i=>i.value);
+    const isAdmin = roles.includes("admin");
+    const isTec = roles.includes("tecnico");
+
+    /* VALIDACIONES IMPORTANTES */
+    if(isAdmin && isTec){
+      return showFormError("El rol admin NO puede coexistir con técnico.");
     }
+
+    if(!isAdmin && isTec && !f_area.value){
+      return showFormError("Un técnico debe tener un área asignada.");
+    }
+
     const payload = {
+      id: currentId,
       username: f_username.value.trim(),
       email: f_email.value.trim(),
       first_name: f_first_name.value.trim(),
       last_name: f_last_name.value.trim(),
-      is_active: !!f_active.checked,
-      roles
+      is_active: f_active.checked,
+      roles: roles,
+      area: f_area.value ? Number(f_area.value) : null
     };
-    if(canManageStaff){ payload.is_staff = !!f_staff?.checked; }
-    const pwd = f_password.value;
-    if(pwd) payload.password = pwd;
+
+    if(f_staff){
+      payload.is_staff = f_staff.checked;
+    }
+
+    if(f_password.value.trim()){
+      payload.password = f_password.value.trim();
+    }
 
     saveBtn.disabled = true;
 
-    const res = currentId ? await updateUser(currentId, payload) : await createUser(payload);
+    const r = await apiFetch("/mantenedor/usuarios/save/", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify(payload)
+    });
 
+    const data = await r.json().catch(()=>({ok:false,error:"Error desconocido"}));
     saveBtn.disabled = false;
 
-    if(!res.ok){
-      showFormError(res.error || "No se pudo guardar.");
-      return;
+    if(!data.ok){
+      return showFormError(data.error || "Error guardando usuario.");
     }
+
     modal.hide();
-    setGlobalMsg(currentId ? "Usuario actualizado." : "Usuario creado.", true);
     await loadUsers();
   });
 
-  // ----- Inicio -----
-  loadUsers();
+  /* ============================================================
+      INIT
+  ============================================================ */
+  (async ()=>{
+    await loadAreas();
+    await loadUsers();
+  })();
+
 })();
 </script>
+
+
 {% endblock %}
