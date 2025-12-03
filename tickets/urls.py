@@ -146,8 +146,6 @@ web_urlpatterns = [
     path("mantenedor/autoasignacion/", views_autoassign.maint_autoassign_page, name="maint_autoassign"),
     path("mantenedor/autoasignacion/save/", views_autoassign.autoassign_save, name="autoassign_save"),
     path("mantenedor/autoasignacion/reset_rr/", views_autoassign.reset_rr, name="reset_rr"),
-    3
-
 
 
     
