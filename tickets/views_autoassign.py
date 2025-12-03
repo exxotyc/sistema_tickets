@@ -123,7 +123,7 @@ def autoassign_save(request):
     except:
         return JsonResponse({"ok": False, "error": "JSON inválido"}, status=400)
 
-    # Leer valores seguros
+    # Leer valores del JSON
     enabled = data.get("enabled", False)
     flags = data.get("tech_flags", {})
 
@@ -132,16 +132,19 @@ def autoassign_save(request):
     if not cfg:
         cfg = AutoAssignConfig.objects.create(enabled=True)
 
-    # Guardar ON/OFF autoasignación
-    cfg.enabled = True if str(enabled).lower() == "true" else False
+    # Normalizar booleano de forma universal
+    enabled_normalized = str(enabled).strip().lower() in ["1", "true", "on", "yes"]
+
+    # Guardar
+    cfg.enabled = enabled_normalized
     cfg.save()
 
-    # Guardar flags de técnicos
+    # Guardar técnicos autoasignables
     for user_id, flag in flags.items():
         try:
-            p = UserProfile.objects.get(user_id=user_id)
-            p.auto_assign_enabled = True if str(flag).lower() == "true" else False
-            p.save()
+            profile = UserProfile.objects.get(user_id=user_id)
+            profile.auto_assign_enabled = str(flag).strip().lower() in ["1", "true", "on", "yes"]
+            profile.save()
         except UserProfile.DoesNotExist:
             continue
 
