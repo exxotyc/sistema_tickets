@@ -356,6 +356,7 @@ class UserProfile(models.Model):
         on_delete=models.SET_NULL,
         related_name="users"
     )
+    auto_assign_enabled = models.BooleanField(default=True)
 
     def __str__(self):
         return f"Perfil de {self.user.username}"
@@ -368,3 +369,26 @@ def create_user_profile(sender, instance, created, **kwargs):
     if created:
         UserProfile.objects.create(user=instance)
 
+
+
+# ==========================
+# Autoasignacion   
+# ==========================
+
+class AutoAssignConfig(models.Model):
+    enabled = models.BooleanField(default=True)
+    mode = models.CharField(max_length=50, default="area_round_robin")  # fijo por ahora
+
+    def __str__(self):
+        return "Configuración de Autoasignación"
+
+# araound robin por area
+class AreaRoundRobin(models.Model):
+    area = models.ForeignKey(Area, on_delete=models.CASCADE)
+    last_user = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
+
+    class Meta:
+        unique_together = ("area",)
+
+    def __str__(self):
+        return f"RR {self.area.name} → {self.last_user.username if self.last_user else 'Ninguno'}"

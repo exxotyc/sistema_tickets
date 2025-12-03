@@ -28,14 +28,12 @@
     </a>
   </div>
 
-  <!-- ⭐⭐⭐ BLOQUE AÑADIDO: Banner FAQ -->
   {% if from_faq %}
   <div class="alert alert-info d-flex align-items-center gap-2">
     <i class="bi bi-info-circle"></i>
     Este ticket fue iniciado desde una pregunta frecuente.
   </div>
   {% endif %}
-  <!-- ⭐⭐⭐ FIN BLOQUE AÑADIDO -->
 
   <form id="frmNew" class="row g-3">
 
@@ -108,37 +106,56 @@
 
 {% block extra_js %}
 <script>
-(function()
-            {
+(function(){
+
+  /* ======================================================
+      FIX: LECTURA DE COOKIE CSRF
+  ====================================================== */
+  function getCookie(name){
+    const m=document.cookie.match('(^|;)\\s*'+name+'\\s*=\\s*([^;]+)');
+    return m ? m.pop() : "";
+  }
+
+  /* ======================================================
+      AUTH HEADER
+  ====================================================== */
   function authHeader(){
     const a = localStorage.getItem("access_token");
     return a ? { Authorization: "Bearer " + a } : {};
   }
 
+  /* ======================================================
+      FIX COMPLETO: API() CON CSRF AUTOMÁTICO
+  ====================================================== */
   async function api(url, opts={}){
-    const r = await fetch(url, {
-      ...opts,
-      headers: {
-        ...(opts.headers || {}),
-        ...authHeader(),
-        ...(opts.body && !opts.headers?.["Content-Type"] && !(opts.body instanceof FormData)
-          ? { "Content-Type": "application/json" }
-          : {})
+    const method = (opts.method || "GET").toUpperCase();
+    const headers = {
+      ...(opts.headers || {}),
+      ...authHeader()
+    };
+
+    const hasBody = !!opts.body;
+
+    // Para métodos que modifican datos → agregar CSRF
+    if(["POST","PUT","PATCH","DELETE"].includes(method)){
+      if(hasBody && !(opts.body instanceof FormData)){
+        headers["Content-Type"] = "application/json";
       }
-    });
-    return r;
+      headers["X-CSRFToken"] = getCookie("csrftoken");
+    }
+
+    return fetch(url, { ...opts, headers });
   }
 
+  /* ======================================================
+      VARIABLES
+  ====================================================== */
   const root = document.getElementById("new-root");
   const isAdminOrTec = root?.dataset.isAdminOrTecnico === "1";
-  // Primero leer parámetros URL (si existe)
+
   const params = new URLSearchParams(window.location.search);
-  const fromFaqParam = params.get("fromfaq") || "";
-  const fromFaqCatParam = params.get("fromfaqcat") || params.get("fromfaq_cat") || "";
-  // Dataset tiene prioridad si la plantilla lo estableció
-  const fromFAQ = root?.dataset.fromFaq || fromFaqParam || "";
-  // categoría sugerida desde FAQ (id o nombre parcial). Dataset tiene prioridad.
-  const catFromFAQ = root?.dataset.fromFaqCat || fromFaqCatParam || "";
+  const fromFAQ = root?.dataset.fromFaq || params.get("fromfaq") || "";
+  const catFromFAQ = root?.dataset.fromFaqCat || params.get("fromfaqcat") || params.get("fromfaq_cat") || "";
 
   const priorityWrapper = document.getElementById("priority-wrapper");
   const prioritySelect  = document.getElementById("priority");
@@ -147,7 +164,9 @@
   const titleEl         = document.getElementById("title");
   const descEl          = document.getElementById("description");
 
-  // Autorrellenar si viene desde FAQ
+  /* ======================================================
+      AUTORELLENO DESDE FAQ
+  ====================================================== */
   if(fromFAQ){
     titleEl.value = `[FAQ] ${fromFAQ}`;
     descEl.value = `El usuario reporta que la siguiente pregunta de FAQ NO resolvió su problema:\n\n"${fromFAQ}"\n\nDescripción adicional: `;
@@ -155,18 +174,21 @@
     msgEl.className = "form-text text-primary fw-bold";
   }
 
-  // Mostrar/ocultar campo prioridad según rol
   if(isAdminOrTec && priorityWrapper){
     priorityWrapper.style.display = "";
   }
 
-  // Cargar categorías
+  /* ======================================================
+      CARGA DE CATEGORÍAS
+  ====================================================== */
   (async ()=>{
     try{
       const r = await api("/api/categories/");
       if(!r.ok) return;
       const data = await r.json();
+
       categorySelect.innerHTML = '<option value="">Sin categoría</option>';
+
       (data.results || data).forEach(c=>{
         const o = document.createElement("option");
         o.value = c.id;
@@ -174,21 +196,12 @@
         categorySelect.appendChild(o);
       });
 
-      // ⭐⭐⭐ preseleccionar categoría del FAQ (si viene el id o nombre)
       if(catFromFAQ){
-        // intentar como id primero
-        const asString = String(catFromFAQ);
-        const byValue = Array.from(categorySelect.options).find(o => o.value === asString);
-        if(byValue){
-          categorySelect.value = asString;
-        }else{
-          // intentar por nombre parcial (case-insensitive)
-          const lower = asString.toLowerCase();
-          const byText = Array.from(categorySelect.options).find(o => o.textContent.toLowerCase().includes(lower));
-          if(byText){
-            categorySelect.value = byText.value;
-          }
-        }
+        const str = String(catFromFAQ).toLowerCase();
+        const opt = Array.from(categorySelect.options).find(o =>
+          o.value === str || o.textContent.toLowerCase().includes(str)
+        );
+        if(opt) categorySelect.value = opt.value;
       }
 
     }catch(e){
@@ -196,7 +209,9 @@
     }
   })();
 
-  // Cargar prioridades (solo si el wrapper está visible)
+  /* ======================================================
+      CARGA DE PRIORIDADES
+  ====================================================== */
   if(isAdminOrTec){
     (async ()=>{
       try{
@@ -207,10 +222,7 @@
         }
         const data = await r.json();
         const items = data.results || data;
-        if(!items.length){
-          prioritySelect.innerHTML = '<option disabled>No hay prioridades definidas</option>';
-          return;
-        }
+
         prioritySelect.innerHTML = "";
         items.forEach(p=>{
           const o = document.createElement("option");
@@ -218,6 +230,7 @@
           o.textContent = `${p.name} (${p.code})`;
           prioritySelect.appendChild(o);
         });
+
       }catch(e){
         console.error("Error cargando prioridades", e);
         prioritySelect.innerHTML = '<option disabled>Error cargando prioridades</option>';
@@ -225,13 +238,17 @@
     })();
   }
 
-  // Botón cancelar
+  /* ======================================================
+      BOTÓN CANCELAR
+  ====================================================== */
   document.getElementById("btnCancel").addEventListener("click", (e)=>{
     e.preventDefault();
     window.location.assign("{% url 'ticket_list' %}");
   });
 
-  // Crear ticket
+  /* ======================================================
+      CREAR TICKET
+  ====================================================== */
   document.getElementById("frmNew").addEventListener("submit", async (e)=>{
     e.preventDefault();
     msgEl.textContent = "";
@@ -248,7 +265,7 @@
     }
 
     let priority = null;
-    if(isAdminOrTec && prioritySelect && prioritySelect.value){
+    if(isAdminOrTec && prioritySelect.value){
       priority = prioritySelect.value;
     }
 
@@ -283,6 +300,7 @@
         msgEl.textContent = "Ticket creado pero no se recibió ID.";
         msgEl.className = "form-text text-warning";
       }
+
     }catch(err){
       console.error("Error creando ticket", err);
       msgEl.textContent = "Error inesperado al crear el ticket.";

@@ -1,186 +1,934 @@
 {% extends "tickets/base.html" %}
-{% load static %}
-
-{% block title %}Dashboard{% endblock %}
+{% block title %}Dashboard · Coyahue{% endblock %}
 
 {% block extra_head %}
 <style>
-  .glass{background:rgba(255,255,255,.92); backdrop-filter:blur(6px); border:1px solid rgba(15,23,42,.06); border-radius:1rem}
-  .kpi{border-radius:1rem; background:linear-gradient(135deg,rgba(255,255,255,.95),rgba(255,255,255,.85)); border:1px solid rgba(15,23,42,.06); box-shadow:0 14px 30px rgba(2,6,23,.10)}
-  .kpi .icon{width:44px; height:44px; display:grid; place-items:center; border-radius:12px; background:linear-gradient(135deg,#0ea5e922,#6366f122)}
-  .kpi .num{font-size:1.8rem; line-height:1; font-weight:700}
-  .chip{font-size:.75rem; padding:.25rem .5rem; border-radius:999px; border:1px solid rgba(15,23,42,.08); background:#fff}
-  .progress-slim{height:10px; background:rgba(15,23,42,.08); border-radius:999px; overflow:hidden}
-  .pb-danger{background:#ef4444}
-  .pb-warn{background:#f59e0b}
-  .pb-success{background:#22c55e}
-  .card-soft{border-radius:1rem; border:1px solid rgba(15,23,42,.06); background:rgba(255,255,255,.9)}
-  .table tr td,.table tr th{vertical-align:middle}
-  .badge-soft{background:#fff; border:1px solid rgba(15,23,42,.08); color:#0f172a}
-  .hover-up{transition:transform .2s ease, box-shadow .2s ease}
-  .hover-up:hover{transform:translateY(-3px); box-shadow:0 18px 40px rgba(2,6,23,.12)}
+  .fade-in{
+    animation:fadeIn .4s ease;
+  }
+  @keyframes fadeIn{
+    from{opacity:0;transform:translateY(4px)}
+    to{opacity:1;transform:none}
+  }
+
+  @keyframes cardLift{
+    from{opacity:0;transform:translateY(8px) scale(.98)}
+    to{opacity:1;transform:translateY(0) scale(1)}
+  }
+
+  @keyframes kpiPop{
+    from{opacity:0;transform:translateY(6px) scale(.96)}
+    to{opacity:1;transform:translateY(0) scale(1)}
+  }
+
+  @keyframes activityIn{
+    from{opacity:0;transform:translateY(4px)}
+    to{opacity:1;transform:translateY(0)}
+  }
+
+  /* LAYOUT GENERAL */
+  #dash-root{
+    display:flex;
+    flex-direction:column;
+    gap:1.25rem;
+  }
+
+  .dash-top{
+    display:grid;
+    grid-template-columns: minmax(0, 2.1fr) minmax(0, 2fr);
+    gap:1rem;
+  }
+  @media (max-width:992px){
+    .dash-top{ grid-template-columns:1fr; }
+  }
+
+  .dash-card{
+    border-radius:1rem;
+    border:1px solid rgba(15,23,42,.06);
+    background:rgba(255,255,255,.94);
+    backdrop-filter:blur(10px);
+    box-shadow:0 18px 40px rgba(15,23,42,.15);
+    padding:1rem 1.1rem;
+    animation:cardLift .45s ease-out both;
+  }
+  /* Delays suaves para la fila inferior */
+  .dash-bottom .dash-card:nth-child(1){ animation-delay:.06s; }
+  .dash-bottom .dash-card:nth-child(2){ animation-delay:.09s; }
+  .dash-bottom .dash-card:nth-child(3){ animation-delay:.12s; }
+
+  .dash-card-header{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    margin-bottom:.5rem;
+    gap:.75rem;
+  }
+  .dash-card-header h5,
+  .dash-card-header h6{
+    margin:0;
+    font-size:.95rem;
+    display:flex;
+    align-items:center;
+    gap:.4rem;
+  }
+  .dash-card-header small{
+    font-size:.78rem;
+    color:#6b7280;
+  }
+
+  /* HERO IZQUIERDA */
+  .hero-main{
+    position:relative;
+    overflow:hidden;
+    animation:cardLift .5s ease-out both;
+  }
+  .hero-main::before{
+    content:"";
+    position:absolute;
+    inset:-30%;
+    background:
+      radial-gradient(circle at 0% 0%, rgba(56,189,248,.25), transparent 60%),
+      radial-gradient(circle at 120% 0%, rgba(129,140,248,.25), transparent 55%);
+    opacity:.8;
+    pointer-events:none;
+  }
+  .hero-inner{
+    position:relative;
+    z-index:2;
+  }
+  .hero-title{
+    font-size:1.25rem;
+    margin-bottom:.15rem;
+    display:flex;
+    align-items:center;
+    gap:.45rem;
+  }
+  .hero-sub{
+    font-size:.85rem;
+    color:#4b5563;
+  }
+  .hero-meta-row{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    gap:.75rem;
+    margin-top:.3rem;
+  }
+  .hero-tag{
+    display:inline-flex;
+    align-items:center;
+    gap:.3rem;
+    padding:.15rem .55rem;
+    border-radius:999px;
+    background:rgba(15,23,42,.04);
+    font-size:.78rem;
+    color:#374151;
+  }
+
+  .hero-kpis{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+    gap:.6rem;
+    margin-top:.9rem;
+  }
+  .hero-kpi-card{
+    border-radius:.9rem;
+    border:1px solid rgba(148,163,184,.35);
+    background:rgba(255,255,255,.95);
+    padding:.5rem .7rem;
+    display:flex;
+    flex-direction:column;
+    gap:.15rem;
+    animation:kpiPop .45s ease-out both;
+  }
+  .hero-kpi-card:nth-child(1){ animation-delay:.10s; }
+  .hero-kpi-card:nth-child(2){ animation-delay:.15s; }
+  .hero-kpi-card:nth-child(3){ animation-delay:.20s; }
+  .hero-kpi-card:nth-child(4){ animation-delay:.25s; }
+  .hero-kpi-card:nth-child(5){ animation-delay:.30s; }
+
+  .hero-kpi-label{
+    font-size:.78rem;
+    color:#6b7280;
+  }
+  .hero-kpi-value{
+    font-size:1.05rem;
+    font-weight:600;
+    display:flex;
+    align-items:center;
+    gap:.3rem;
+  }
+  .hero-kpi-chip{
+    font-size:.72rem;
+    padding:.05rem .4rem;
+    border-radius:999px;
+    background:rgba(15,23,42,.04);
+    color:#4b5563;
+  }
+
+  /* ACCIONES RÁPIDAS DERECHA */
+  .quick-actions{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+    gap:.7rem;
+  }
+  .qa-item{
+    position:relative;
+    border-radius:.9rem;
+    border:1px solid rgba(148,163,184,.35);
+    background:rgba(255,255,255,.96);
+    padding:.6rem .75rem;
+    text-decoration:none;
+    color:#111827;
+    display:flex;
+    flex-direction:column;
+    justify-content:space-between;
+    gap:.15rem;
+    overflow:hidden;
+    transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+  }
+  .qa-item::after{
+    content:"";
+    position:absolute;
+    inset:0;
+    background:linear-gradient(135deg, transparent 0%, rgba(59,130,246,.12) 45%, transparent 100%);
+    opacity:0;
+    transition:opacity .2s ease;
+    pointer-events:none;
+  }
+  .qa-item:hover{
+    border-color:rgba(59,130,246,.8);
+    box-shadow:0 16px 32px rgba(15,23,42,.16);
+    transform:translateY(-2px);
+    text-decoration:none;
+  }
+  .qa-item:hover::after{
+    opacity:1;
+  }
+  .qa-title{
+    font-size:.86rem;
+    font-weight:600;
+  }
+  .qa-desc{
+    font-size:.78rem;
+    color:#6b7280;
+  }
+  .qa-icon{
+    font-size:1.25rem;
+    opacity:.9;
+  }
+
+  /* GRID INFERIOR */
+  .dash-bottom{
+    display:grid;
+    grid-template-columns:minmax(0, 2.2fr) minmax(0, 2.1fr) minmax(0, 2.1fr);
+    gap:1rem;
+  }
+  @media (max-width:1200px){
+    .dash-bottom{ grid-template-columns:1fr 1fr; }
+  }
+  @media (max-width:768px){
+    .dash-bottom{ grid-template-columns:1fr; }
+  }
+
+  .table-sm thead th{
+    font-size:.75rem;
+    color:#6b7280;
+  }
+  .table-sm tbody td{
+    font-size:.78rem;
+  }
+
+  .badge-soft-state{
+    border-radius:999px;
+    font-size:.7rem;
+    padding:.15rem .45rem;
+  }
+  .badge-soft-open{background:rgba(248,113,113,.12);color:#b91c1c;}
+  .badge-soft-inp{background:rgba(250,204,21,.16);color:#854d0e;}
+  .badge-soft-res{background:rgba(59,130,246,.14);color:#1d4ed8;}
+  .badge-soft-clo{background:rgba(34,197,94,.14);color:#166534;}
+
+  .status-dot{
+    width:7px;height:7px;border-radius:999px;display:inline-block;
+  }
+  .status-dot-open{background:#ef4444;}
+  .status-dot-inp{background:#f59e0b;}
+  .status-dot-res{background:#3b82f6;}
+  .status-dot-clo{background:#22c55e;}
+
+  .pill{
+    display:inline-flex;
+    align-items:center;
+    gap:.3rem;
+    font-size:.74rem;
+    padding:.1rem .45rem;
+    border-radius:999px;
+    background:rgba(15,23,42,.03);
+    color:#4b5563;
+  }
+
+  .activity-list{
+    max-height:260px;
+    overflow-y:auto;
+  }
+  .activity-item{
+    padding:.35rem 0;
+    border-bottom:1px solid rgba(15,23,42,.05);
+    font-size:.8rem;
+    opacity:0;
+    transform:translateY(4px);
+    animation:activityIn .35s ease-out forwards;
+  }
+  .activity-item:last-child{
+    border-bottom:none;
+  }
+
+  /* Aparición suave de los gráficos */
+  .dash-card canvas{
+    opacity:0;
+    transition:opacity .6s ease;
+  }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container py-3 py-md-4">
+<div id="dash-root" class="fade-in">
 
-  <!-- Encabezado -->
-  <div class="d-flex align-items-center justify-content-between mb-3">
-    <div class="d-flex align-items-center gap-2">
-      <span class="badge rounded-pill badge-soft">Coyahue</span>
-      <h1 class="h4 m-0">Dashboard</h1>
+  <!-- FILA SUPERIOR: HERO + ACCIONES -->
+  <div class="dash-top">
+
+    <!-- HERO PRINCIPAL -->
+    <div class="dash-card hero-main">
+      <div class="hero-inner">
+        <div class="hero-meta-row">
+          <div>
+            <div class="hero-sub mb-1">Resumen del día</div>
+            <div class="hero-title">
+              <i class="bi bi-speedometer2 text-primary"></i>
+              <span>Hola, <span id="heroName">{{ request.user.username }}</span></span>
+            </div>
+            <p class="hero-sub mb-2">
+              Desde aquí puedes controlar tus tickets, prioridades y SLA sin moverte del dashboard.
+            </p>
+          </div>
+          <div class="text-end">
+            <div class="hero-tag mb-1">
+              <i class="bi bi-person-workspace"></i>
+              <span id="heroRoleLabel">Usuario</span>
+            </div>
+            <div id="heroDate" class="hero-sub text-end"></div>
+          </div>
+        </div>
+
+        <div class="hero-kpis">
+
+          <!-- KPI 1: Tickets abiertos de la persona -->
+          <div class="hero-kpi-card">
+            <div class="hero-kpi-label" id="kpi1Label">Mis tickets abiertos</div>
+            <div class="hero-kpi-value">
+              <span id="kpiMyOpen">0</span>
+              <span class="hero-kpi-chip">
+                <span class="status-dot status-dot-open"></span>
+                activos
+              </span>
+            </div>
+          </div>
+
+          <!-- KPI 2: En progreso -->
+          <div class="hero-kpi-card">
+            <div class="hero-kpi-label">En progreso</div>
+            <div class="hero-kpi-value">
+              <span id="kpiMyInProgress">0</span>
+              <span class="hero-kpi-chip">
+                <span class="status-dot status-dot-inp"></span>
+                trabajando
+              </span>
+            </div>
+          </div>
+
+          <!-- KPI 3: Resueltos hoy -->
+          <div class="hero-kpi-card">
+            <div class="hero-kpi-label">Resueltos hoy</div>
+            <div class="hero-kpi-value">
+              <span id="kpiMyResolvedToday">0</span>
+              <span class="hero-kpi-chip">
+                <span class="status-dot status-dot-res"></span>
+                hoy
+              </span>
+            </div>
+          </div>
+
+          <!-- KPI 4: Tickets en riesgo -->
+          <div class="hero-kpi-card">
+            <div class="hero-kpi-label">SLA en riesgo (próx. 24h)</div>
+            <div class="hero-kpi-value">
+              <span id="kpiMyRisk">0</span>
+              <span class="hero-kpi-chip">
+                <i class="bi bi-exclamation-triangle-fill text-warning"></i>
+                revisar
+              </span>
+            </div>
+          </div>
+
+          <!-- KPI 5: Solo admins/tecs: tickets sin asignar -->
+          <div class="hero-kpi-card d-none" id="kpiUnassignedWrap">
+            <div class="hero-kpi-label">Tickets sin asignar</div>
+            <div class="hero-kpi-value">
+              <span id="kpiUnassigned">0</span>
+              <span class="hero-kpi-chip">
+                <i class="bi bi-person-lines-fill"></i>
+                por distribuir
+              </span>
+            </div>
+          </div>
+
+        </div>
+      </div>
     </div>
-    <div class="btn-group">
-      <a href="{% url 'ticket_list' %}" class="btn btn-primary btn-ripple">
-        <i class="bi bi-list-ul me-1"></i>Listado
-      </a>
-      {% if not is_tecnico %}
-  <a href="{% url 'ticket_new' %}" class="btn btn-primary btn-sm btn-ticket" data-hard-nav="1">
-    <i class="bi bi-plus-lg"></i>
-    <span>Nuevo</span>
-  </a>
-{% endif %}
+
+    <!-- ACCIONES RÁPIDAS -->
+    <div class="dash-card">
+      <div class="dash-card-header mb-2">
+        <h6>
+          <i class="bi bi-lightning-charge-fill text-warning"></i>
+          Acciones rápidas
+        </h6>
+        <small>Accede a las funciones clave en un clic.</small>
+      </div>
+
+      <div class="quick-actions">
+
+        <!-- Nuevo ticket -->
+        <a href="{% url 'ticket_new' %}" class="qa-item btn-ripple">
+          <div class="d-flex justify-content-between align-items-start">
+            <div>
+              <div class="qa-title">Nuevo ticket</div>
+              <div class="qa-desc">Registrar una nueva solicitud.</div>
+            </div>
+            <div class="qa-icon text-info">
+              <i class="bi bi-plus-square-fill"></i>
+            </div>
+          </div>
+        </a>
+
+        {% if is_tecnico %}
+        <!-- Mis tickets (técnico) -->
+        <a href="{% url 'ticket_list_assigned' %}" class="qa-item btn-ripple">
+          <div class="d-flex justify-content-between align-items-start">
+            <div>
+              <div class="qa-title">Mis tickets</div>
+              <div class="qa-desc">Vista sólo con tus tickets.</div>
+            </div>
+            <div class="qa-icon text-primary">
+              <i class="bi bi-person-check-fill"></i>
+            </div>
+          </div>
+        </a>
+
+        <!-- Todos los tickets -->
+        <a href="{% url 'ticket_list_all' %}" class="qa-item btn-ripple">
+          <div class="d-flex justify-content-between align-items-start">
+            <div>
+              <div class="qa-title">Todos los tickets</div>
+              <div class="qa-desc">Visión global del soporte.</div>
+            </div>
+            <div class="qa-icon text-warning">
+              <i class="bi bi-collection-fill"></i>
+            </div>
+          </div>
+        </a>
+        {% else %}
+        <!-- Mis solicitudes para usuarios normales -->
+        <a href="{% url 'ticket_list' %}" class="qa-item btn-ripple">
+          <div class="d-flex justify-content-between align-items-start">
+            <div>
+              <div class="qa-title">Mis tickets</div>
+              <div class="qa-desc">Historial de tus solicitudes.</div>
+            </div>
+            <div class="qa-icon text-primary">
+              <i class="bi bi-person-lines-fill"></i>
+            </div>
+          </div>
+        </a>
+        {% endif %}
+
+        <!-- FAQ -->
+        <a href="{% url 'faq' %}" class="qa-item btn-ripple">
+          <div class="d-flex justify-content-between align-items-start">
+            <div>
+              <div class="qa-title">FAQ / Base de conocimientos</div>
+              <div class="qa-desc">Respuestas rápidas a problemas frecuentes.</div>
+            </div>
+            <div class="qa-icon text-success">
+              <i class="bi bi-journal-text"></i>
+            </div>
+          </div>
+        </a>
+
+        {% if is_admin or is_tecnico %}
+        <!-- Reportes -->
+        <a href="{% url 'reports_page' %}" class="qa-item btn-ripple">
+          <div class="d-flex justify-content-between align-items-start">
+            <div>
+              <div class="qa-title">Reportes</div>
+              <div class="qa-desc">Exportar métricas y tendencias.</div>
+            </div>
+            <div class="qa-icon text-danger">
+              <i class="bi bi-graph-up-arrow"></i>
+            </div>
+          </div>
+        </a>
+        {% endif %}
+
+        {% if is_admin %}
+        <!-- Mantenedor -->
+        <a href="{% url 'maint_index' %}" class="qa-item btn-ripple">
+          <div class="d-flex justify-content-between align-items-start">
+            <div>
+              <div class="qa-title">Mantenedor</div>
+              <div class="qa-desc">Usuarios, roles, áreas, categorías, prioridades, FAQ.</div>
+            </div>
+            <div class="qa-icon text-secondary">
+              <i class="bi bi-gear-wide-connected"></i>
+            </div>
+          </div>
+        </a>
+
+        <!-- Sistema -->
+        <a href="{% url 'sistema_page' %}" class="qa-item btn-ripple">
+          <div class="d-flex justify-content-between align-items-start">
+            <div>
+              <div class="qa-title">Panel del sistema</div>
+              <div class="qa-desc">Logs, salud del sistema, auditoría.</div>
+            </div>
+            <div class="qa-icon">
+              <i class="bi bi-hdd-network-fill"></i>
+            </div>
+          </div>
+        </a>
+        {% endif %}
+
+      </div>
     </div>
-    
+
   </div>
 
-  <!-- KPIs -->
-  <div class="row g-3">
-    <div class="col-6 col-md-3">
-      <div class="kpi p-3 hover-up">
-        <div class="d-flex align-items-center justify-content-between">
-          <div>
-            <div class="text-muted small">Total</div>
-            <div class="num">{{ total }}</div>
-          </div>
-          <div class="icon"><i class="bi bi-grid"></i></div>
-        </div>
-        <div class="mt-2"><span class="chip">Todos</span></div>
+  <!-- FILA INFERIOR: TABLA + GRÁFICOS + ACTIVIDAD -->
+  <div class="dash-bottom">
+
+    <!-- MIS TICKETS ABIERTOS / SOLICITUDES -->
+    <div class="dash-card">
+      <div class="dash-card-header">
+        <h6>
+          <i class="bi bi-list-check text-primary"></i>
+          <span id="myOpenTitle">Mis tickets abiertos</span>
+        </h6>
+        <small id="myOpenCountLabel">0 tickets</small>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Título</th>
+              <th>Estado</th>
+              <th>Prioridad</th>
+              <th>Área</th>
+            </tr>
+          </thead>
+          <tbody id="tblMyOpenBody">
+            <tr>
+              <td colspan="5" class="text-muted text-center py-3 small">
+                Cargando…
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
-    <div class="col-6 col-md-2">
-      <div class="kpi p-3 hover-up">
-        <div class="d-flex align-items-center justify-content-between">
-          <div>
-            <div class="text-muted small">Abiertos</div>
-            <div class="num">{{ abiertos }}</div>
-          </div>
-          <div class="icon"><i class="bi bi-bug"></i></div>
-        </div>
-        <div class="mt-2"><span class="chip">Pendientes</span></div>
+
+    <!-- GRÁFICOS -->
+    <div class="dash-card">
+      <div class="dash-card-header">
+        <h6><i class="bi bi-pie-chart-fill text-warning"></i> Mis tickets por estado</h6>
+        <small>Distribución actual</small>
+      </div>
+      <div style="height:220px;position:relative;">
+        <canvas id="chartState"></canvas>
+      </div>
+
+      <hr class="my-2">
+
+      <div class="dash-card-header mt-2">
+        <h6><i class="bi bi-bar-chart-line text-info"></i> Mis tickets por prioridad</h6>
+        <small>Abiertos o en progreso</small>
+      </div>
+      <div style="height:210px;position:relative;">
+        <canvas id="chartPriority"></canvas>
       </div>
     </div>
-    <div class="col-6 col-md-2">
-      <div class="kpi p-3 hover-up">
-        <div class="d-flex align-items-center justify-content-between">
-          <div>
-            <div class="text-muted small">En progreso</div>
-            <div class="num">{{ en_progreso }}</div>
-          </div>
-          <div class="icon"><i class="bi bi-hourglass-split"></i></div>
-        </div>
-        <div class="mt-2"><span class="chip">Atendiéndose</span></div>
+
+    <!-- ACTIVIDAD RECIENTE -->
+    <div class="dash-card">
+      <div class="dash-card-header">
+        <h6><i class="bi bi-clock-history text-secondary"></i> Actividad reciente</h6>
+        <small id="activityTitleHint">Últimos movimientos en tus tickets</small>
       </div>
-    </div>
-    <div class="col-6 col-md-2">
-      <div class="kpi p-3 hover-up">
-        <div class="d-flex align-items-center justify-content-between">
-          <div>
-            <div class="text-muted small">Resueltos</div>
-            <div class="num">{{ resueltos }}</div>
-          </div>
-          <div class="icon"><i class="bi bi-check2-circle"></i></div>
-        </div>
-        <div class="mt-2"><span class="chip">Exitosos</span></div>
+
+      <div id="recentList" class="activity-list">
+        <div class="text-muted small py-2">Cargando actividad…</div>
       </div>
-    </div>
-    <div class="col-6 col-md-3">
-      <div class="kpi p-3 hover-up">
-        <div class="d-flex align-items-center justify-content-between">
-          <div>
-            <div class="text-muted small">Mis tickets</div>
-            <div class="num">{{ mios }}</div>
-          </div>
-          <div class="icon"><i class="bi bi-person-badge"></i></div>
-        </div>
-        <div class="mt-2"><span class="chip">Propios</span></div>
+
+      <hr class="my-3">
+
+      <div class="dash-card-header">
+        <h6><i class="bi bi-lightbulb text-warning"></i> Sugerencias</h6>
       </div>
+      <ul class="small mb-0 text-muted">
+        <li>Revisa primero los tickets <strong>críticos</strong> y con vencimiento más cercano.</li>
+        <li>Deja comentarios para mantener trazabilidad del caso.</li>
+        <li>Adjunta evidencias (capturas, logs) para acelerar la resolución.</li>
+      </ul>
     </div>
+
   </div>
-
-  <!-- Distribución -->
-  <div class="glass p-3 mt-3 hover-up">
-    <div class="d-flex justify-content-between align-items-center mb-2">
-      <div class="small text-muted">Distribución por estado</div>
-      <div class="small">
-        <span class="me-2"><i class="bi bi-square-fill" style="color:#ef4444"></i> Abiertos {{ pa }}%</span>
-        <span class="me-2"><i class="bi bi-square-fill" style="color:#f59e0b"></i> Progreso {{ pp }}%</span>
-        <span><i class="bi bi-square-fill" style="color:#22c55e"></i> Resueltos {{ pr }}%</span>
-      </div>
-    </div>
-    <div class="progress-slim">
-      <div class="pb-danger" style="width: {{ pa }}%; height:100%; float:left"></div>
-      <div class="pb-warn" style="width: {{ pp }}%; height:100%; float:left"></div>
-      <div class="pb-success" style="width: {{ pr }}%; height:100%; float:left"></div>
-      <div style="clear:both"></div>
-    </div>
-  </div>
-
-  <!-- Últimos tickets -->
-  <div class="glass p-3 mt-3 hover-up">
-    <div class="d-flex justify-content-between align-items-center mb-2">
-      <span class="small text-muted d-flex align-items-center gap-2">
-        <i class="bi bi-clock-history"></i> Últimos tickets (7 días)
-      </span>
-      <a href="{% url 'ticket_list' %}" class="btn btn-sm btn-outline-secondary btn-ripple">Ver todos</a>
-    </div>
-
-    <div class="table-responsive">
-      <table class="table table-hover mb-0">
-        <thead class="table-light">
-          <tr>
-            <th>#</th>
-            <th>Título</th>
-            <th>Prioridad</th>
-            <th>Estado</th>
-            <th>SLA</th>
-            <th>Creado</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for t in recientes %}
-          <tr onclick="window.location.href='/tickets/{{ t.id }}/'" style="cursor:pointer">
-            <td>{{ t.id }}</td>
-            <td class="text-truncate" style="max-width:240px">{{ t.title }}</td>
-            <td><span class="badge text-bg-light">{{ t.get_priority_display }}</span></td>
-            <td>
-              {% if t.state == "open" %}
-                <span class="badge text-bg-danger">Abierto</span>
-              {% elif t.state == "in_progress" %}
-                <span class="badge text-bg-warning">En progreso</span>
-              {% elif t.state == "resolved" %}
-                <span class="badge text-bg-success">Resuelto</span>
-              {% elif t.state == "closed" %}
-                <span class="badge text-bg-secondary">Cerrado</span>
-              {% else %}
-                <span class="badge text-bg-light">{{ t.get_state_display }}</span>
-              {% endif %}
-            </td>
-            <td>
-              {% with label=t.get_sla_label %}
-                <span class="badge text-bg-{{ label.1 }}">{{ label.2 }} {{ label.0 }}</span>
-              {% endwith %}
-            </td>
-            <td class="text-nowrap">{{ t.created_at|date:"Y-m-d H:i" }}</td>
-          </tr>
-          {% empty %}
-          <tr><td colspan="6" class="text-center text-muted py-3">No hay tickets recientes.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+(function(){
+
+  // 🔗 Alias: hacemos que todo lo que use apiFetch internamente llame a api()
+  // api() viene definido en base.html (global)
+  async function apiFetch(url, opts = {}){
+    return api(url, opts);
+  }
+
+  function esc(s){
+    return String(s||"").replace(/[&<>"']/g, m => ({
+      "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
+    }[m]));
+  }
+
+  function fmtDate(d){
+    if(!d) return "-";
+    const dt = new Date(d);
+    return dt.toLocaleString("es-CL");
+  }
+
+  function setHeroDate(){
+    const el = document.getElementById("heroDate");
+    if(!el) return;
+    const now = new Date();
+    el.textContent = now.toLocaleString("es-CL", {
+      weekday:"long",
+      day:"2-digit",
+      month:"short",
+      hour:"2-digit",
+      minute:"2-digit"
+    });
+  }
+
+  // Contador animado suave
+  function animateCounter(el, toValue){
+    if(!el) return;
+    const target = Number(toValue) || 0;
+    const duration = 700;
+    const startTime = performance.now();
+    const from = 0;
+
+    function tick(now){
+      const progress = Math.min((now - startTime) / duration, 1);
+      const value = Math.round(from + (target - from) * progress);
+      el.textContent = value;
+      if(progress < 1){
+        requestAnimationFrame(tick);
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+
+  async function loadDashboard(){
+    try{
+      // 1) stats → usuario + roles
+      const rStats = await apiFetch("/api/stats/");
+      if(!rStats.ok){
+        console.error("No se pudo cargar /api/stats/", rStats.status);
+        return;
+      }
+      const stats = await rStats.json();
+      const user = stats.user || null;
+      const userId = user ? user.id : null;
+      const roles = (user && user.roles) || [];
+
+      const isAdmin  = roles.includes("admin");
+      const isTech   = roles.includes("tecnico");
+      const isSolic  = roles.includes("usuario");
+
+      // Nombre en hero
+      if(user && user.username){
+        const g = document.getElementById("heroName");
+        if(g) g.textContent = user.username;
+      }
+
+      // Texto rol
+      const heroRoleLabel = document.getElementById("heroRoleLabel");
+      if(heroRoleLabel){
+        if(isAdmin) heroRoleLabel.textContent = "Administrador";
+        else if(isTech) heroRoleLabel.textContent = "Técnico";
+        else heroRoleLabel.textContent = "Solicitante";
+      }
+
+      // 2) tickets
+      const rTickets = await apiFetch("/api/tickets/?ordering=-updated_at&page_size=200");
+      if(!rTickets.ok){
+        console.error("No se pudo cargar /api/tickets/", rTickets.status);
+        return;
+      }
+      const raw = await rTickets.json();
+      const tickets = Array.isArray(raw) ? raw : (raw.results || []);
+
+      // "Mis tickets" depende del rol
+      let myTickets = [];
+      if(userId){
+        if(isTech || isAdmin){
+          myTickets = tickets.filter(t => t.assigned_to === userId);
+        }else{
+          myTickets = tickets.filter(t => t.requester === userId);
+        }
+      }
+
+      const now = new Date();
+
+      const myOpen     = myTickets.filter(t => t.state === "open");
+      const myInProg   = myTickets.filter(t => t.state === "in_progress");
+      const myResolved = myTickets.filter(t => t.state === "resolved");
+      const myClosed   = myTickets.filter(t => t.state === "closed");
+
+      const today = new Date();
+      const myResolvedToday = myResolved.filter(t => {
+        if(!t.updated_at) return false;
+        const d = new Date(t.updated_at);
+        return d.toDateString() === today.toDateString();
+      });
+
+      const myRisk = myTickets.filter(t => {
+        if(!t.resolve_due_at) return false;
+        const due = new Date(t.resolve_due_at);
+        const diffHours = (due - now) / 36e5;
+        return diffHours > 0 && diffHours <= 24;
+      });
+
+      // Tickets sin asignar (solo admin/tecs)
+      const unassigned = (isAdmin || isTech)
+        ? tickets.filter(t => !t.assigned_to && (t.state === "open" || t.state === "in_progress"))
+        : [];
+
+      // KPI: labels
+      const kpi1Label = document.getElementById("kpi1Label");
+      const myOpenTitle = document.getElementById("myOpenTitle");
+      const activityTitleHint = document.getElementById("activityTitleHint");
+
+      if(isAdmin || isTech){
+        if(kpi1Label) kpi1Label.textContent = "Mis tickets abiertos asignados";
+        if(myOpenTitle) myOpenTitle.textContent = "Mis tickets abiertos";
+        if(activityTitleHint) activityTitleHint.textContent = "Últimos movimientos en tickets asignados a ti.";
+      }else{
+        if(kpi1Label) kpi1Label.textContent = "Mis solicitudes abiertas";
+        if(myOpenTitle) myOpenTitle.textContent = "Mis solicitudes abiertas";
+        if(activityTitleHint) activityTitleHint.textContent = "Últimos cambios en tus solicitudes.";
+      }
+
+      // KPI: valores (con contador animado)
+      animateCounter(document.getElementById("kpiMyOpen"),          myOpen.length);
+      animateCounter(document.getElementById("kpiMyInProgress"),    myInProg.length);
+      animateCounter(document.getElementById("kpiMyResolvedToday"), myResolvedToday.length);
+      animateCounter(document.getElementById("kpiMyRisk"),          myRisk.length);
+
+      const kpiUnassignedWrap = document.getElementById("kpiUnassignedWrap");
+      if(kpiUnassignedWrap){
+        if(isAdmin || isTech){
+          kpiUnassignedWrap.classList.remove("d-none");
+          animateCounter(document.getElementById("kpiUnassigned"), unassigned.length);
+        }else{
+          kpiUnassignedWrap.classList.add("d-none");
+        }
+      }
+
+      // Tabla "Mis tickets abiertos / solicitudes"
+      const tbody = document.getElementById("tblMyOpenBody");
+      const label = document.getElementById("myOpenCountLabel");
+      if(label) label.textContent = myOpen.length + " ticket(s)";
+
+      if(!myOpen.length){
+        tbody.innerHTML = '<tr><td colspan="5" class="text-muted text-center py-3 small">No tienes tickets abiertos actualmente.</td></tr>';
+      }else{
+        tbody.innerHTML = "";
+        myOpen.slice(0, 10).forEach(t => {
+          const tr = document.createElement("tr");
+
+          let badgeCls = "badge-soft-state badge-soft-open";
+          let text = "Abierto";
+          if(t.state === "in_progress"){ badgeCls="badge-soft-state badge-soft-inp"; text="En progreso"; }
+          else if(t.state === "resolved"){ badgeCls="badge-soft-state badge-soft-res"; text="Resuelto"; }
+          else if(t.state === "closed"){ badgeCls="badge-soft-state badge-soft-clo"; text="Cerrado"; }
+
+          tr.innerHTML = `
+            <td>#${t.id}</td>
+            <td>${esc(t.title || "Sin título")}</td>
+            <td><span class="${badgeCls}">${text}</span></td>
+            <td>${esc(t.priority_name || "—")}</td>
+            <td>${esc(t.area_name || "—")}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+      }
+
+      // Actividad reciente
+      const recentWrap = document.getElementById("recentList");
+      if(recentWrap){
+        recentWrap.innerHTML = "";
+        myTickets.slice(0, 12).forEach((t, idx) => {
+          let labelTxt = "Actualizado";
+          if(t.state === "open") labelTxt = "Abierto";
+          else if(t.state === "in_progress") labelTxt = "En progreso";
+          else if(t.state === "resolved") labelTxt = "Resuelto";
+          else if(t.state === "closed") labelTxt = "Cerrado";
+
+          const row = document.createElement("div");
+          row.className = "activity-item";
+          row.style.animationDelay = (idx * 0.03) + "s";
+          row.innerHTML = `
+            <div class="d-flex justify-content-between gap-2">
+              <div>
+                <strong>#${t.id}</strong> · ${esc(t.title || "")}
+                <div class="text-muted small">
+                  ${labelTxt} · ${esc(t.area_name || "Sin área")}
+                </div>
+              </div>
+              <small class="text-muted">${fmtDate(t.updated_at || t.created_at)}</small>
+            </div>
+          `;
+          recentWrap.appendChild(row);
+        });
+
+        if(!myTickets.length){
+          recentWrap.innerHTML = '<div class="text-muted small py-2">Sin actividad reciente en tus tickets.</div>';
+        }
+      }
+
+      // GRÁFICOS
+      const ctxState = document.getElementById("chartState");
+      const ctxPrio  = document.getElementById("chartPriority");
+
+      const countsByState = {open:0, in_progress:0, resolved:0, closed:0};
+      myTickets.forEach(t => {
+        if(countsByState.hasOwnProperty(t.state)){
+          countsByState[t.state]++;
+        }
+      });
+
+      if(ctxState){
+        const chartState = new Chart(ctxState, {
+          type:"doughnut",
+          data:{
+            labels:["Abierto","En progreso","Resuelto","Cerrado"],
+            datasets:[{
+              data:[
+                countsByState.open,
+                countsByState.in_progress,
+                countsByState.resolved,
+                countsByState.closed
+              ],
+              backgroundColor:[
+                "rgba(248,113,113,.9)",
+                "rgba(250,204,21,.9)",
+                "rgba(59,130,246,.9)",
+                "rgba(34,197,94,.9)"
+              ],
+              borderWidth:1,
+              borderColor:"rgba(15,23,42,.1)"
+            }]
+          },
+          options:{
+            animation:{
+              duration:900,
+              easing:"easeOutCubic",
+              animateScale:true,
+              animateRotate:true,
+              onComplete: function(){
+                ctxState.style.opacity = "1";
+              }
+            },
+            plugins:{
+              legend:{ position:"bottom", labels:{ boxWidth:14 } }
+            },
+            responsive:true,
+            maintainAspectRatio:false
+          }
+        });
+        // Por si acaso, si la animación no dispara onComplete
+        setTimeout(()=>{ ctxState.style.opacity = "1"; }, 1000);
+      }
+
+      const activeTickets = myTickets.filter(t => t.state === "open" || t.state === "in_progress");
+      const prioCounts = {};
+      activeTickets.forEach(t => {
+        const key = t.priority_name || "Sin prioridad";
+        prioCounts[key] = (prioCounts[key] || 0) + 1;
+      });
+
+      if(ctxPrio){
+        const labelsPrio = Object.keys(prioCounts);
+        const valuesPrio = Object.values(prioCounts);
+
+        const chartPrio = new Chart(ctxPrio, {
+          type:"bar",
+          data:{
+            labels: labelsPrio,
+            datasets:[{
+              data: valuesPrio,
+              backgroundColor:"rgba(59,130,246,.85)",
+              borderColor:"rgba(30,64,175,1)",
+              borderWidth:1,
+              borderRadius:4
+            }]
+          },
+          options:{
+            animation:{
+              duration:800,
+              easing:"easeOutCubic",
+              onComplete: function(){
+                ctxPrio.style.opacity = "1";
+              }
+            },
+            indexAxis:"y",
+            plugins:{ legend:{ display:false } },
+            scales:{
+              x:{ beginAtZero:true, ticks:{ precision:0 } }
+            },
+            responsive:true,
+            maintainAspectRatio:false
+          }
+        });
+        setTimeout(()=>{ ctxPrio.style.opacity = "1"; }, 900);
+      }
+
+    }catch(err){
+      console.error("Error en dashboard:", err);
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", ()=>{
+    setHeroDate();
+    loadDashboard();
+  });
+
+})();
+</script>
+
 {% endblock %}

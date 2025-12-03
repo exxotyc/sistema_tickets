@@ -21,6 +21,21 @@ def ticket_created_or_updated(sender, instance: Ticket, created, **kwargs):
         except Exception:
             logger.exception("No se pudo notificar la creación del ticket %s", instance.pk)
 
+                # Autoasignación por área (round robin)
+        try:
+            from tickets.services.autoassign import auto_assign_ticket
+            assigned = auto_assign_ticket(instance)
+            if assigned:
+                TicketLog.objects.create(
+                    ticket=instance,
+                    user=None,
+                    action="autoassigned",
+                    meta_json={"assigned_to": assigned.username},
+                    is_critical=False
+                )
+        except Exception:
+            logger.exception("Autoasignación falló en ticket %s", instance.pk)
+
 
 @receiver(user_login_failed)
 def audit_failed_login(sender, credentials, request, **kwargs):

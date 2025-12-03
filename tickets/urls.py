@@ -4,6 +4,7 @@ from django.views.generic import RedirectView
 from django.contrib.auth.views import LoginView
 from rest_framework import routers
 from rest_framework_simplejwt.views import TokenRefreshView
+from . import views_autoassign
 
 # Views
 from . import views, views_users
@@ -141,6 +142,13 @@ web_urlpatterns = [
     # Area
     path("mantenedor/areas/", views.maint_areas, name="maint_areas"),
 
+    # Autoasignación de técnicos
+    path("mantenedor/autoasignacion/", views_autoassign.maint_autoassign_page, name="maint_autoassign"),
+    path("mantenedor/autoasignacion/save/", views_autoassign.autoassign_save, name="autoassign_save"),
+    path("mantenedor/autoasignacion/reset_rr/", views_autoassign.reset_rr, name="reset_rr"),
+    3
+
+
 
     
 ]
@@ -149,6 +157,7 @@ web_urlpatterns = [
 #   URL FINAL
 # ============================================================
 urlpatterns = web_urlpatterns + [
-    path("api/", include((api_urlpatterns, "tickets"), namespace="api")),
+    path("api/", include((api_urlpatterns, "api"), namespace="api")),
 ]
+
 

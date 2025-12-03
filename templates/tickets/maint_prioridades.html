@@ -108,7 +108,18 @@
 <script>
 (function(){
 
-  function esc(s){return String(s||"").replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));}
+  // ============================================================
+  //  ALIAS: apiFetch usa el cliente global "api()" del base.html
+  // ============================================================
+  async function apiFetch(url, opts = {}){
+    return api(url, opts);   // usa JWT + CSRF + refresh
+  }
+
+  function esc(s){
+    return String(s||"").replace(/[&<>"']/g,m=>({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[m]));
+  }
 
   const rows = document.getElementById("rows");
   const btnNew = document.getElementById("btnNew");
@@ -138,22 +149,43 @@
     formAlert.classList.add("d-none");
   }
 
-  // Cargar lista
+  // ============================================================
+  //  CARGAR LISTA
+  // ============================================================
   async function load(){
-    rows.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Cargando…</td></tr>';
+    rows.innerHTML = `
+      <tr>
+        <td colspan="5" class="text-center text-muted py-4">Cargando…</td>
+      </tr>`;
+
     const r = await apiFetch("/api/priorities/");
-    if(!r) return;
+    if(!r.ok){
+      rows.innerHTML = `
+        <tr><td colspan="5" class="text-center text-danger py-3">
+          Error cargando prioridades
+        </td></tr>`;
+      return;
+    }
+
     const j = await r.json();
     records = j || [];
     render();
   }
 
-  // Render tabla
+  // ============================================================
+  //  RENDER TABLA
+  // ============================================================
   function render(){
     if(!records.length){
-      rows.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Sin prioridades</td></tr>';
+      rows.innerHTML = `
+        <tr>
+          <td colspan="5" class="text-center text-muted py-4">
+            Sin prioridades
+          </td>
+        </tr>`;
       return;
     }
+
     rows.innerHTML = "";
     records.forEach(p=>{
       const tr = document.createElement("tr");
@@ -161,12 +193,18 @@
         <td>${esc(p.name)}</td>
         <td><code>${esc(p.code)}</code></td>
         <td>${p.sla_minutes}</td>
-        <td>${p.is_active ? '<span class="badge text-bg-success">Sí</span>' : '<span class="badge text-bg-secondary">No</span>'}</td>
+        <td>
+          ${p.is_active
+            ? '<span class="badge text-bg-success">Sí</span>'
+            : '<span class="badge text-bg-secondary">No</span>'}
+        </td>
         <td class="text-end">
-          <button class="btn btn-outline-primary btn-sm btn-ripple me-1" data-edit="${p.id}">
+          <button class="btn btn-outline-primary btn-sm btn-ripple me-1"
+                  data-edit="${p.id}">
             <i class="bi bi-pencil"></i>
           </button>
-          <button class="btn btn-outline-danger btn-sm btn-ripple" data-del="${p.id}">
+          <button class="btn btn-outline-danger btn-sm btn-ripple"
+                  data-del="${p.id}">
             <i class="bi bi-trash"></i>
           </button>
         </td>
@@ -175,7 +213,9 @@
     });
   }
 
-  // Crear
+  // ============================================================
+  //  NUEVA PRIORIDAD
+  // ============================================================
   btnNew.addEventListener("click", ()=>{
     currentId = null;
     form.reset();
@@ -184,39 +224,45 @@
     modal.show();
   });
 
-  // Editar
+  // ============================================================
+  //  EDITAR
+  // ============================================================
   rows.addEventListener("click", ev=>{
     const btn = ev.target.closest("button[data-edit]");
     if(!btn) return;
 
     const id = Number(btn.dataset.edit);
-    const p = records.find(x=>x.id===id);
+    const p = records.find(x=>x.id === id);
     if(!p) return;
 
     currentId = id;
     hideFormError();
     modalTitle.textContent = "Editar prioridad";
 
-    document.getElementById("f_name").value = p.name;
-    document.getElementById("f_code").value = p.code;
-    document.getElementById("f_sla").value = p.sla_minutes;
+    document.getElementById("f_name").value  = p.name;
+    document.getElementById("f_code").value  = p.code;
+    document.getElementById("f_sla").value   = p.sla_minutes;
     document.getElementById("f_active").checked = !!p.is_active;
 
     modal.show();
   });
 
-  // Eliminar
+  // ============================================================
+  //  ELIMINAR
+  // ============================================================
   rows.addEventListener("click", async ev=>{
     const btn = ev.target.closest("button[data-del]");
     if(!btn) return;
 
     const id = Number(btn.dataset.del);
-    const p = records.find(x=>x.id===id);
+    const p = records.find(x=>x.id === id);
     if(!p) return;
 
     if(!confirm(`¿Eliminar la prioridad "${p.name}"?`)) return;
 
-    const r = await apiFetch(`/api/priorities/${id}/`, { method:"DELETE" });
+    const r = await apiFetch(`/api/priorities/${id}/`, {
+      method:"DELETE"
+    });
 
     if(!r.ok){
       showGlobal("Error al eliminar.", false);
@@ -227,7 +273,9 @@
     load();
   });
 
-  // Guardar
+  // ============================================================
+  //  GUARDAR (CREATE / UPDATE)
+  // ============================================================
   form.addEventListener("submit", async ev=>{
     ev.preventDefault();
     hideFormError();
@@ -266,10 +314,17 @@
     load();
   });
 
+  // ============================================================
+  //  RECARGAR
+  // ============================================================
   btnReload.addEventListener("click", load);
 
+  // ============================================================
+  //  INICIO
+  // ============================================================
   load();
 
 })();
 </script>
+
 {% endblock %}

@@ -169,12 +169,16 @@ class CategoryViewSet(viewsets.ModelViewSet):
     serializer_class = CategorySerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
+
 class AreaViewSet(viewsets.ModelViewSet):
     queryset = Area.objects.all().order_by("name")
     serializer_class = AreaSerializer
-    permission_classes = [permissions.IsAuthenticated]
 
-    authentication_classes = [JWTAuthentication, SessionAuthentication]
+    # ✔ Usa solo JWT, NO mezcles SessionAuthentication
+    authentication_classes = [JWTAuthentication]
+
+    # ✔ Requiere estar autenticado (vía JWT)
+    permission_classes = [IsAuthenticated]
 
 
 # tickets/views.py
@@ -592,18 +596,20 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.response import Response
 
 @api_view(["POST"])
-@permission_classes([IsAuthenticated])   # ← IMPORTANTE
+@permission_classes([IsAuthenticated])
 def session_token(request):
+    """
+    Genera un par de tokens JWT usando EXACTAMENTE la misma
+    lógica interna que SimpleJWT.
+    """
 
-    user = request.user  # ya viene autenticado gracias al decorador
-
+    user = request.user
     refresh = RefreshToken.for_user(user)
 
-    return Response({
+    return JsonResponse({
         "access": str(refresh.access_token),
         "refresh": str(refresh)
     })
-
 
 # ========== Vistas HTML ====================
 

@@ -130,7 +130,7 @@ def users_data(request):
 
 
 # ==========================================================
-#   API — CREAR / EDITAR USUARIO
+#   API — CREAR / EDITAR USUARIO  (VALIDACIÓN DE ÁREA CORREGIDA)
 # ==========================================================
 @login_required
 @require_POST
@@ -152,15 +152,33 @@ def users_save(request):
     last_name = (data.get("last_name") or "").strip()
     is_staff = bool(data.get("is_staff", False))
     is_active = bool(data.get("is_active", True))
-    desired_roles = [ (r or "").strip().lower() for r in (data.get("roles") or []) if r ]
-    desired_roles = sorted(set(desired_roles))
-    raw_password = data.get("password")
 
-    # === AREA DEL PERFIL ===
+    desired_roles = [(r or "").strip().lower() for r in (data.get("roles") or []) if r]
+    desired_roles = sorted(set(desired_roles))
+
+    raw_password = data.get("password")
     area_id = data.get("area")
 
-    if not username:
-        return HttpResponseBadRequest("username requerido")
+    # ================================
+    # VALIDACIONES IMPORTANTES (BACKEND)
+    # ================================
+    is_admin = "admin" in desired_roles
+    is_tec = "tecnico" in desired_roles
+    is_solic = "usuario" in desired_roles
+
+    # 🔥 ADMIN puede tener área o NO tenerla, NO requiere validación adicional
+    # 🔥 TÉCNICO y SOLICITANTE → DEBEN tener área obligatoria
+    if (is_tec or is_solic) and not area_id:
+        return JsonResponse({
+            "ok": False,
+            "error": "Los roles técnico y solicitante requieren un área asignada."
+        }, status=400)
+
+    if is_admin and is_tec:
+        return JsonResponse({
+            "ok": False,
+            "error": "El rol admin NO puede coexistir con técnico."
+        }, status=400)
 
     # =========================
     # CREAR USUARIO
@@ -169,9 +187,14 @@ def users_save(request):
         if User.objects.filter(username=username).exists():
             return JsonResponse({"ok": False, "error": "Username ya existe."}, status=400)
 
-        user = User(username=username, email=email, first_name=first_name, last_name=last_name)
-        user.is_staff = is_staff
-        user.is_active = is_active
+        user = User(
+            username=username,
+            email=email,
+            first_name=first_name,
+            last_name=last_name,
+            is_staff=is_staff,
+            is_active=is_active
+        )
 
         if raw_password:
             user.set_password(raw_password)
@@ -203,24 +226,19 @@ def users_save(request):
             user.set_password(raw_password)
             user.save()
 
-    # ======================================================
-    #   GUARDAR EL ÁREA EN EL PERFIL
-    # ======================================================
+    # ================================
+    # GUARDAR ÁREA EN EL PERFIL
+    # ================================
     profile, _ = UserProfile.objects.get_or_create(user=user)
-
-    if area_id:
-        profile.area_id = area_id
-    else:
-        profile.area = None
-
+    profile.area_id = area_id if area_id else None
     profile.save()
 
-    # ======================================================
-    #   APLICAR ROLES
-    # ======================================================
+    # ================================
+    # APLICAR ROLES
+    # ================================
     try:
         desired_set = assert_actor_can_manage(request.user, user, desired_roles)
-        final_roles: Iterable[str] = apply_roles(user, sorted(desired_set))
+        final_roles = apply_roles(user, sorted(desired_set))
     except LastAdminRemovalError as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=409)
     except RolePermissionError as e:
@@ -240,6 +258,8 @@ def users_save(request):
             "area_name": profile.area.name if profile.area else "",
         }
     })
+
+
 
 
 # ==========================================================

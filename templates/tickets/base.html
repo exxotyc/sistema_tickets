@@ -175,109 +175,122 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
 <script>
+/* ============================================================
+      EFECTO RIPPLE
+============================================================ */
 document.addEventListener("pointerdown",(e)=>{
-    const btn=e.target.closest(".btn-ripple");
-    if(!btn) return;
-    const r=btn.getBoundingClientRect();
-    btn.style.setProperty("--x",(e.clientX-r.left)+"px");
-    btn.style.setProperty("--y",(e.clientY-r.top)+"px");
+  const btn = e.target.closest(".btn-ripple");
+  if(!btn) return;
+  const r = btn.getBoundingClientRect();
+  btn.style.setProperty("--x",(e.clientX - r.left) + "px");
+  btn.style.setProperty("--y",(e.clientY - r.top)  + "px");
 });
 </script>
 
 {% if request.user.is_authenticated %}
 <script>
-/* ============================================================================
-        JWT + CSRF + SESSION TOKEN
-============================================================================ */
-
+/* ============================================================
+      COOKIES
+============================================================ */
 function getCookie(name){
-    const m=document.cookie.match('(^|;)\\s*'+name+'\\s*=\\s*([^;]+)');
-    return m ? m.pop() : "";
+  const m = document.cookie.match("(^|;)\\s*"+name+"\\s*=\\s*([^;]+)");
+  return m ? m.pop() : "";
 }
 
+/* ============================================================
+      CLIENTE UNIVERSAL API — JWT + CSRF + REFRESH
+============================================================ */
+async function api(url, opts={}){
+  const method = (opts.method || "GET").toUpperCase();
+  const options = { ...opts, headers:{ ...(opts.headers || {}) } };
 
-/* =====================================================
-   REFRESH TOKEN
-===================================================== */
-async function refreshToken(){
-    const refresh = localStorage.getItem("refresh_token");
-    if(!refresh) return null;
+  // JWT en todas las requests
+  const access = localStorage.getItem("access_token");
+  if(access){
+    options.headers["Authorization"] = "Bearer " + access;
+  }
 
-    const r = await fetch("/api/token/refresh/", {
-        method:"POST",
-        credentials:"include",
-        headers:{
-            "Content-Type":"application/json",
-            "X-CSRFToken": getCookie("csrftoken"),
-        },
-        body: JSON.stringify({ refresh })
+  // CSRF SOLO para métodos que modifican
+  if(["POST","PUT","PATCH","DELETE"].includes(method)){
+    const csrf = getCookie("csrftoken");
+    if(csrf){
+      options.headers["X-CSRFToken"] = csrf;
+    }
+
+    // Auto JSON excepto FormData
+    if(options.body &&
+        !(options.body instanceof FormData) &&
+        !options.headers["Content-Type"]){
+      options.headers["Content-Type"] = "application/json";
+    }
+  }
+
+  /* ========== 1° intento ========== */
+  let response = await fetch(url, options);
+  if(response.status !== 401){
+    return response;
+  }
+
+  /* ========== Intentar REFRESH ========== */
+  const refresh = localStorage.getItem("refresh_token");
+  if(!refresh){
+    localStorage.clear();
+    location.assign("/");
+    return response;
+  }
+
+  const refreshResp = await fetch("/api/token/refresh/", {
+    method:"POST",
+    credentials:"include",
+    headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ refresh })
+  });
+
+  // Si falla el refresh → limpiar y redirigir
+  if(!refreshResp.ok){
+    localStorage.clear();
+    location.assign("/");
+    return response;
+  }
+
+  // REFRESH OK → guardar nuevo access
+  const data = await refreshResp.json();
+  localStorage.setItem("access_token", data.access);
+
+  // Reintentar request original con el nuevo access token
+  options.headers["Authorization"] = "Bearer " + data.access;
+  return fetch(url, options);
+}
+
+/* ============================================================
+       CREAR TOKEN DE SESIÓN DESPUÉS DEL LOGIN
+============================================================ */
+(async ()=>{
+  const user = "{{ request.user.username }}";
+  const stored = localStorage.getItem("username");
+
+  // Si cambió usuario → limpiar
+  if(stored && stored !== user){
+    localStorage.clear();
+  }
+
+  // Crear tokens si NO existen
+  if(!localStorage.getItem("access_token")){
+    const r = await fetch("/api/token/session/", {
+      method:"POST",
+      credentials:"include",
+      headers:{
+        "X-CSRFToken": getCookie("csrftoken")
+      }
     });
 
-    if(!r.ok) return null;
-
-    const data = await r.json();
-    localStorage.setItem("access_token", data.access);
-    return data.access;
-}
-
-
-/* =====================================================
-   GLOBAL FETCH (con JWT)
-===================================================== */
-async function apiFetch(url, options = {}){
-    options.headers = options.headers || {};
-    options.credentials = "include";
-
-    const access = localStorage.getItem("access_token");
-    if(access){
-        options.headers["Authorization"] = "Bearer " + access;
+    if(r.ok){
+      const data = await r.json();
+      localStorage.setItem("access_token", data.access);
+      localStorage.setItem("refresh_token", data.refresh);
+      localStorage.setItem("username", user);
     }
-
-    if(["POST","PUT","PATCH","DELETE"].includes(options.method)){
-        options.headers["Content-Type"] = "application/json";
-        options.headers["X-CSRFToken"] = getCookie("csrftoken");
-    }
-
-    let response = await fetch(url, options);
-
-    if(response.status === 401){
-        const newT = await refreshToken();
-        if(newT){
-            options.headers["Authorization"] = "Bearer " + newT;
-            response = await fetch(url, options);
-        }
-    }
-    return response;
-}
-
-
-/* =====================================================
-   CREAR TOKEN DESPUÉS DEL LOGIN (SI NO EXISTE)
-===================================================== */
-(async ()=>{
-    const user = "{{ request.user.username }}";
-    const stored = localStorage.getItem("username");
-
-    // Si el usuario cambió, borrar todo
-    if(stored && stored !== user){
-        localStorage.clear();
-    }
-
-    // Si no existe token, crearlo
-    if(!localStorage.getItem("access_token")){
-        const r = await fetch("{% url 'api:token_session' %}", {
-            method:"POST",
-            credentials:"include",
-            headers:{ "X-CSRFToken": getCookie("csrftoken") }
-        });
-
-        if(r.ok){
-            const data = await r.json();
-            localStorage.setItem("access_token", data.access);
-            localStorage.setItem("refresh_token", data.refresh);
-            localStorage.setItem("username", user);
-        }
-    }
+  }
 })();
 </script>
 {% endif %}

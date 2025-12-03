@@ -104,9 +104,22 @@
               <input id="f_last_name" type="text" class="form-control">
             </div>
 
+            <!-- Contraseña + ver -->
             <div class="col-md-6">
               <label class="form-label">Contraseña</label>
-              <input id="f_password" type="password" class="form-control" autocomplete="current-password">
+              <div class="input-group">
+                <input id="f_password" type="password" class="form-control" autocomplete="new-password">
+                <button class="btn btn-outline-secondary" type="button" id="btnTogglePwd">
+                  <i class="bi bi-eye"></i>
+                </button>
+              </div>
+              <div class="form-text">Deja en blanco para mantener la actual.</div>
+            </div>
+
+            <!-- Confirmar contraseña -->
+            <div class="col-md-6">
+              <label class="form-label">Confirmar contraseña</label>
+              <input id="f_password2" type="password" class="form-control" autocomplete="new-password">
             </div>
 
             <div class="col-md-6">
@@ -153,101 +166,166 @@
 
 {% block extra_js %}
 <script>
-
 console.log("[maint_usuarios] script cargado");
 
 /* ============================================================
-   API FETCH GLOBAL (JWT)
+   API FETCH GLOBAL (JWT + CSRF)
 ============================================================ */
 async function apiFetch(url, options = {}){
     options.headers = options.headers || {};
     options.credentials = "include";
 
-    // JWT
     const token = localStorage.getItem("access_token");
-    if(token){
+    if (token){
         options.headers["Authorization"] = "Bearer " + token;
     }
 
-    // CSRF — SOLO para métodos que escriben
     const csrf = document.cookie
         .split("; ")
         .find(r => r.startsWith("csrftoken="))
         ?.split("=")[1];
 
-    if (csrf && ["POST","PUT","PATCH","DELETE"].includes((options.method||"GET").toUpperCase())) {
+    const method = (options.method || "GET").toUpperCase();
+    if (csrf && ["POST","PUT","PATCH","DELETE"].includes(method)) {
         options.headers["X-CSRFToken"] = csrf;
-        options.headers["Content-Type"] = "application/json";
+        if (!options.headers["Content-Type"]) {
+            options.headers["Content-Type"] = "application/json";
+        }
     }
 
     return fetch(url, options);
 }
 
-
 /* ============================================================
    SCRIPT PRINCIPAL
 ============================================================ */
-
 (function(){
 
   console.log("[maint_usuarios] init");
 
-  function esc(s){
-    return String(s||"").replace(/[&<>"']/g, m => ({
-      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-    }[m]));
-  }
-
-  const rows = document.getElementById("rows");
-  const q = document.getElementById("q");
-  const btnNew = document.getElementById("btnNew");
+  const rows      = document.getElementById("rows");
+  const q         = document.getElementById("q");
+  const btnNew    = document.getElementById("btnNew");
   const btnReload = document.getElementById("btnReload");
+  const globalMsg = document.getElementById("globalMsg");
 
-  const modalEl = document.getElementById("userModal");
-  const modal = new bootstrap.Modal(modalEl);
-  const form = document.getElementById("userForm");
+  const modalEl   = document.getElementById("userModal");
+  const modal     = new bootstrap.Modal(modalEl);
+  const form      = document.getElementById("userForm");
   const formAlert = document.getElementById("formAlert");
-  const modalTitle = document.getElementById("modalTitle");
-  const saveBtn = document.getElementById("saveBtn");
+  const modalTitle= document.getElementById("modalTitle");
+  const saveBtn   = document.getElementById("saveBtn");
 
-  const f_username = document.getElementById("f_username");
-  const f_email = document.getElementById("f_email");
+  const f_username   = document.getElementById("f_username");
+  const f_email      = document.getElementById("f_email");
   const f_first_name = document.getElementById("f_first_name");
-  const f_last_name = document.getElementById("f_last_name");
-  const f_password = document.getElementById("f_password");
-  const f_active = document.getElementById("f_active");
-  const f_staff = document.getElementById("f_staff");
-  const f_area = document.getElementById("f_area");
-  const roleChecks = document.getElementById("roleChecks");
+  const f_last_name  = document.getElementById("f_last_name");
+  const f_password   = document.getElementById("f_password");
+  const f_password2  = document.getElementById("f_password2");
+  const btnTogglePwd = document.getElementById("btnTogglePwd");
+  const f_active     = document.getElementById("f_active");
+  const f_staff      = document.getElementById("f_staff");
+  const f_area       = document.getElementById("f_area");
+  const roleChecks   = document.getElementById("roleChecks");
 
-  const infoEl = document.getElementById("rbacInfo");
+  const infoEl       = document.getElementById("rbacInfo");
   const allowedRoles = JSON.parse(infoEl.dataset.allowed || "[]");
-  const roleOptions = JSON.parse(infoEl.dataset.roleOptions || "[]");
-  const canManageStaff = infoEl.dataset.canStaff === "true";
+  const roleOptions  = JSON.parse(infoEl.dataset.roleOptions || "[]");
 
   let allUsers = [];
   let areaList = [];
   let currentId = null;
 
-  function hideFormError(){ formAlert.classList.add("d-none"); }
-  function showFormError(msg){ formAlert.textContent = msg; formAlert.classList.remove("d-none"); }
+  /* ============================
+     Helpers
+  ============================ */
+  function hideFormError(){
+    formAlert.classList.add("d-none");
+  }
+  function showFormError(msg){
+    formAlert.textContent = msg || "Error desconocido";
+    formAlert.classList.remove("d-none");
+  }
+  function setGlobalMsg(msg, ok=true){
+    if (!msg){
+      globalMsg.classList.add("d-none");
+      return;
+    }
+    globalMsg.className = "alert " + (ok ? "alert-success" : "alert-danger");
+    globalMsg.textContent = msg;
+    globalMsg.classList.remove("d-none");
+    setTimeout(() => globalMsg.classList.add("d-none"), 2600);
+  }
 
   /* ============================================================
-      CARGAR ÁREAS
+      TOGGLE VER CONTRASEÑA
   ============================================================ */
-  async function loadAreas(){
-    const r = await apiFetch("/api/areas/");
+  if (btnTogglePwd){
+    btnTogglePwd.addEventListener("click", ()=>{
+      const isPwd = f_password.type === "password";
+      f_password.type = isPwd ? "text" : "password";
+      if (f_password2){
+        f_password2.type = isPwd ? "text" : "password";
+      }
+      const icon = btnTogglePwd.querySelector("i");
+      if(icon){
+        icon.className = isPwd ? "bi bi-eye-slash" : "bi bi-eye";
+      }
+    });
+  }
+
+/* ============================================================
+   CARGAR ÁREAS (versión estable + retry)
+============================================================ */
+async function loadAreas(){
+
+  // 1) Esperar a que el token exista (máx 3 segundos)
+  let tries = 0;
+  while (!localStorage.getItem("access_token") && tries < 60){
+      await new Promise(r => setTimeout(r, 50));
+      tries++;
+  }
+
+  async function fetchAreas(){
+      const r = await apiFetch("/api/areas/");
+      if(r.status === 401){
+          console.warn("[loadAreas] 401 → intentando refresh…");
+          const newToken = await refreshToken?.(); // por si está definida globalmente
+          if(newToken){
+              return await apiFetch("/api/areas/");
+          }
+      }
+      return r;
+  }
+
+  try{
+    const r = await fetchAreas();
+
+    if (!r.ok){
+      console.error("Error cargando áreas:", r.status);
+      f_area.innerHTML = '<option value="">(Error cargando áreas)</option>';
+      return;
+    }
+
     const data = await r.json();
     areaList = data;
 
     f_area.innerHTML = '<option value="">(Sin área asignada)</option>';
-    areaList.forEach(a=>{
+
+    data.forEach(a=>{
       const opt = document.createElement("option");
       opt.value = a.id;
       opt.textContent = a.name;
       f_area.appendChild(opt);
     });
+
+    console.log("[loadAreas] Áreas cargadas correctamente:", data.length);
+
+  }catch(err){
+    console.error("loadAreas error", err);
+    f_area.innerHTML = '<option value="">(Error cargando áreas)</option>';
   }
+}
 
   /* ============================================================
       CARGAR USUARIOS
@@ -255,11 +333,19 @@ async function apiFetch(url, options = {}){
   async function loadUsers(){
     rows.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">Cargando…</td></tr>';
 
-    const r = await apiFetch("/mantenedor/usuarios/data/");
-    const data = await r.json();
-
-    allUsers = data.users || [];
-    render(allUsers);
+    try{
+      const r = await apiFetch("/mantenedor/usuarios/data/");
+      if (!r.ok){
+        rows.innerHTML = '<tr><td colspan="9" class="text-center text-danger py-4">Error cargando usuarios.</td></tr>';
+        return;
+      }
+      const data = await r.json();
+      allUsers = data.users || [];
+      render(allUsers);
+    }catch(err){
+      console.error("loadUsers error", err);
+      rows.innerHTML = '<tr><td colspan="9" class="text-center text-danger py-4">Error cargando usuarios.</td></tr>';
+    }
   }
 
   /* ============================================================
@@ -274,24 +360,48 @@ async function apiFetch(url, options = {}){
     rows.innerHTML = "";
 
     list.forEach(u=>{
-      const name = `${u.full_name || ""}`;
-      const roles = u.roles.map(r=> `<span class="badge text-bg-light me-1 tag">${r}</span>`).join("");
+      const full      = u.full_name || "";
+      const rolesHtml = (u.roles || [])
+        .map(r=> `<span class="badge text-bg-light me-1 tag">${r}</span>`)
+        .join("");
 
       const tr = document.createElement("tr");
       tr.dataset.id = u.id;
 
+      if (!u.is_active){
+        tr.classList.add("table-danger", "text-muted");
+      }
+
+      const toggleBtnHtml = u.is_active
+        ? `<button class="btn btn-outline-danger btn-sm" data-action="deactivate">
+             <i class="bi bi-trash"></i>
+           </button>`
+        : `<button class="btn btn-outline-success btn-sm" data-action="reactivate">
+             <i class="bi bi-arrow-counterclockwise"></i>
+           </button>`;
+
       tr.innerHTML = `
         <td>${u.id}</td>
         <td><strong>${u.username}</strong></td>
-        <td>${name || "—"}</td>
+        <td>${full || "—"}</td>
         <td>${u.email || "—"}</td>
         <td>${u.area_name || "—"}</td>
-        <td>${u.is_active ? "Sí":"No"}</td>
-        <td>${u.is_staff ? "Sí":"No"}</td>
-        <td>${roles || "—"}</td>
+        <td>
+          ${u.is_active
+            ? '<span class="badge text-bg-success">Sí</span>'
+            : '<span class="badge text-bg-danger">No</span>'}
+        </td>
+        <td>
+          ${u.is_staff
+            ? '<span class="badge text-bg-primary">Sí</span>'
+            : '<span class="badge text-bg-secondary">No</span>'}
+        </td>
+        <td>${rolesHtml || "—"}</td>
         <td class="text-end">
-          <button class="btn btn-outline-primary btn-sm" data-action="edit"><i class="bi bi-pencil"></i></button>
-          <button class="btn btn-outline-danger btn-sm" data-action="del"><i class="bi bi-trash"></i></button>
+          <button class="btn btn-outline-primary btn-sm me-1" data-action="edit">
+            <i class="bi bi-pencil"></i>
+          </button>
+          ${toggleBtnHtml}
         </td>
       `;
 
@@ -300,7 +410,7 @@ async function apiFetch(url, options = {}){
   }
 
   /* ============================================================
-      FILTRO DE BÚSQUEDA
+      FILTRO
   ============================================================ */
   q.addEventListener("input", ()=>{
     const t = q.value.toLowerCase();
@@ -314,7 +424,7 @@ async function apiFetch(url, options = {}){
   });
 
   /* ============================================================
-      CLICK EN EL LISTADO
+      CLICK EN EL LISTADO (EDIT / DESACTIVAR / REACTIVAR)
   ============================================================ */
   rows.addEventListener("click", async ev=>{
     const btn = ev.target.closest("button[data-action]");
@@ -322,59 +432,96 @@ async function apiFetch(url, options = {}){
 
     const id = btn.closest("tr").dataset.id;
     const user = allUsers.find(u=>u.id==id);
+    if(!user) return;
 
-    if(btn.dataset.action==="edit"){
+    if(btn.dataset.action === "edit"){
       openModal("edit", user);
+    }
+    else if(btn.dataset.action === "deactivate" || btn.dataset.action === "reactivate"){
+      const willActivate = btn.dataset.action === "reactivate";
+      const actionText = willActivate ? "reactivar" : "desactivar";
+
+      if(!confirm(`¿Seguro que deseas ${actionText} al usuario "${user.username}"?`)){
+        return;
+      }
+
+      try{
+        const r = await apiFetch("/mantenedor/usuarios/toggle/", {
+          method: "POST",
+          body: JSON.stringify({
+            id: user.id,
+            active: willActivate
+          })
+        });
+
+        const data = await r.json().catch(()=>({ok:false,error:"Error desconocido"}));
+        if(!data.ok){
+          setGlobalMsg(data.error || "No se pudo cambiar el estado del usuario.", false);
+          return;
+        }
+
+        setGlobalMsg(`Usuario ${actionText} correctamente.`, true);
+        await loadUsers();
+      }catch(err){
+        console.error("toggle error", err);
+        setGlobalMsg("Error de red al cambiar el estado del usuario.", false);
+      }
     }
   });
 
   /* ============================================================
-      CLICK NUEVO USUARIO
+      CLICK NUEVO / RECARGAR
   ============================================================ */
   btnNew.addEventListener("click", ()=>{
     openModal("create", null);
   });
 
+  if (btnReload){
+    btnReload.addEventListener("click", ()=>{
+      loadUsers();
+    });
+  }
+
   /* ============================================================
-      ABRIR MODAL (EDITAR / CREAR)
+      ABRIR MODAL
   ============================================================ */
   function openModal(mode, user){
     form.reset();
     hideFormError();
     currentId = null;
     f_password.value = "";
+    if(f_password2) f_password2.value = "";
 
     if(mode === "edit" && user){
       modalTitle.textContent = "Editar usuario";
       currentId = user.id;
 
       f_username.value = user.username;
-      f_email.value = user.email;
-      f_first_name.value = user.full_name.split(" ")[0] || "";
-      f_last_name.value = user.full_name.split(" ")[1] || "";
-      f_active.checked = user.is_active;
+      f_email.value    = user.email;
 
-      if(f_staff) f_staff.checked = user.is_staff;
+      const parts = (user.full_name||"").trim().split(" ");
+      f_first_name.value = parts[0] || "";
+      f_last_name.value  = parts.slice(1).join(" ");
+
+      f_active.checked = !!user.is_active;
+      if(f_staff) f_staff.checked = !!user.is_staff;
 
       f_area.value = user.area_id || "";
-
-      buildRoleInputs(user.roles);
+      buildRoleInputs(user.roles || []);
     }
     else {
       modalTitle.textContent = "Nuevo usuario";
-
-      buildRoleInputs([]);
       f_active.checked = true;
-
       if(f_staff) f_staff.checked = false;
       f_area.value = "";
+      buildRoleInputs([]);
     }
 
     modal.show();
   }
 
   /* ============================================================
-      ROLES
+      ROLES UI
   ============================================================ */
   function buildRoleInputs(selected){
     roleChecks.innerHTML = "";
@@ -390,86 +537,136 @@ async function apiFetch(url, options = {}){
       input.id = "role_"+opt.code;
       input.value = opt.code;
       input.checked = sel.has(opt.code);
-      wrap.appendChild(input);
 
       const label = document.createElement("label");
-      label.textContent = opt.label;
       label.className = "form-check-label";
-      label.setAttribute("for",input.id);
-      wrap.appendChild(label);
+      label.setAttribute("for", input.id);
+      label.textContent = opt.label;
 
+      wrap.appendChild(input);
+      wrap.appendChild(label);
       roleChecks.appendChild(wrap);
     });
   }
 
   /* ============================================================
-      GUARDAR USUARIO
+      GUARDAR
   ============================================================ */
   form.addEventListener("submit", async e=>{
     e.preventDefault();
     hideFormError();
 
-    const roles = Array.from(roleChecks.querySelectorAll("input:checked")).map(i=>i.value);
-    const isAdmin = roles.includes("admin");
-    const isTec = roles.includes("tecnico");
+    const username = f_username.value.trim();
+    const email    = (f_email.value || "").trim().toLowerCase();
 
-    /* VALIDACIONES IMPORTANTES */
+    if(!username){
+      return showFormError("El nombre de usuario es obligatorio.");
+    }
+
+    // Validación de duplicados (username)
+    const dupUser = allUsers.find(u =>
+      u.username.toLowerCase() === username.toLowerCase() &&
+      u.id !== currentId
+    );
+    if(dupUser){
+      return showFormError("Ya existe un usuario con ese nombre de usuario.");
+    }
+
+    // Validación de duplicados (email)
+    if(email){
+      const dupEmail = allUsers.find(u =>
+        (u.email || "").toLowerCase() === email &&
+        u.id !== currentId
+      );
+      if(dupEmail){
+        return showFormError("Ya existe un usuario con ese correo electrónico.");
+      }
+    }
+
+    // Validación de contraseña + confirmación
+    const pwd  = f_password.value.trim();
+    const pwd2 = f_password2 ? f_password2.value.trim() : "";
+
+    if(pwd && pwd !== pwd2){
+      return showFormError("Las contraseñas no coinciden.");
+    }
+
+    const roles = Array.from(
+      roleChecks.querySelectorAll("input:checked")
+    ).map(i=>i.value);
+
+    const isAdmin = roles.includes("admin");
+    const isTec   = roles.includes("tecnico");
+    const isSolic = roles.includes("usuario");
+
+    // 🔥 VALIDACIONES DE ROLES + ÁREA
     if(isAdmin && isTec){
       return showFormError("El rol admin NO puede coexistir con técnico.");
     }
 
-    if(!isAdmin && isTec && !f_area.value){
-      return showFormError("Un técnico debe tener un área asignada.");
+    if(!isAdmin && (isTec || isSolic) && !f_area.value){
+      return showFormError("Técnicos y solicitantes deben tener un área asignada.");
     }
 
     const payload = {
-      id: currentId,
-      username: f_username.value.trim(),
-      email: f_email.value.trim(),
+      id:         currentId,
+      username:   username,
+      email:      email,
       first_name: f_first_name.value.trim(),
-      last_name: f_last_name.value.trim(),
-      is_active: f_active.checked,
-      roles: roles,
-      area: f_area.value ? Number(f_area.value) : null
+      last_name:  f_last_name.value.trim(),
+      is_active:  f_active.checked,
+      roles:      roles,
+      area:       f_area.value ? Number(f_area.value) : null
     };
 
     if(f_staff){
       payload.is_staff = f_staff.checked;
     }
 
-    if(f_password.value.trim()){
-      payload.password = f_password.value.trim();
+    if(pwd){
+      payload.password = pwd;
     }
 
     saveBtn.disabled = true;
 
-    const r = await apiFetch("/mantenedor/usuarios/save/", {
-      method:"POST",
-      headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify(payload)
-    });
+    try{
+      const r = await apiFetch("/mantenedor/usuarios/save/", {
+        method:"POST",
+        body: JSON.stringify(payload)
+      });
 
-    const data = await r.json().catch(()=>({ok:false,error:"Error desconocido"}));
-    saveBtn.disabled = false;
+      const data = await r.json().catch(()=>({ok:false,error:"Error desconocido"}));
+      saveBtn.disabled = false;
 
-    if(!data.ok){
-      return showFormError(data.error || "Error guardando usuario.");
+      if(!data.ok){
+        return showFormError(data.error || "Error guardando usuario.");
+      }
+
+      modal.hide();
+      setGlobalMsg("Usuario guardado correctamente.", true);
+      await loadUsers();
+    }catch(err){
+      console.error("save error", err);
+      saveBtn.disabled = false;
+      showFormError("Error de red al guardar el usuario.");
     }
-
-    modal.hide();
-    await loadUsers();
   });
 
   /* ============================================================
       INIT
   ============================================================ */
   (async ()=>{
+    const stats = await apiFetch("/api/stats/");
+    if(!stats.ok){
+        console.error("Token inválido o expirado");
+        return;
+    }
+
     await loadAreas();
     await loadUsers();
   })();
 
 })();
 </script>
-
 
 {% endblock %}

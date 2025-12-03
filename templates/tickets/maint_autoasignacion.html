@@ -1,0 +1,380 @@
+{% extends "tickets/base.html" %}
+{% block title %}Autoasignación · Coyahue{% endblock %}
+
+{% block extra_head %}
+<style>
+  .card-pro {
+    background: rgba(255,255,255,0.92);
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(15,23,42,.08);
+    border-radius: 1rem;
+    padding: 1.4rem;
+  }
+
+  .metric-box {
+    border: 1px solid rgba(15,23,42,.08);
+    border-radius: .7rem;
+    padding: .8rem .9rem;
+    background: rgba(255,255,255,0.65);
+  }
+
+  .metric-title {
+    font-size: .75rem;
+    color: #6b7280;
+    margin-bottom: .1rem;
+  }
+
+  .metric-value {
+    font-size: 1.2rem;
+    font-weight: 600;
+  }
+
+  .load-low    { color: #16a34a; font-weight: 600; } /* Verde */
+  .load-medium { color: #ca8a04; font-weight: 600; } /* Amarillo */
+  .load-high   { color: #dc2626; font-weight: 600; } /* Rojo */
+
+  table.table-pro {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .9rem;
+  }
+  table.table-pro th {
+    background: rgba(15,23,42,.05);
+    font-weight: 600;
+    padding: .55rem .5rem;
+    border-bottom: 1px solid rgba(15,23,42,.1);
+  }
+  table.table-pro td {
+    padding: .5rem .4rem;
+    border-bottom: 1px solid rgba(15,23,42,.06);
+  }
+  table.table-pro tr:hover {
+    background: rgba(15,23,42,.04);
+  }
+
+  .switch-lg {
+    transform: scale(1.3);
+    cursor: pointer;
+  }
+
+  .btn-save {
+    padding: .45rem 1.1rem;
+    border-radius: .6rem;
+    background: #2563eb;
+    color: white;
+    border: none;
+  }
+  .btn-save:hover {
+    background: #1d4ed8;
+  }
+
+  .btn-rr {
+    padding: .3rem .8rem;
+    border-radius: .4rem;
+    border: 1px solid rgba(15,23,42,.15);
+    background: white;
+  }
+  .btn-rr:hover {
+    background: rgba(15,23,42,.04);
+  }
+
+  .history-box {
+    border: 1px solid rgba(15,23,42,.08);
+    border-radius: .7rem;
+    padding: 1rem;
+    background: rgba(255,255,255,.78);
+  }
+
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card-pro">
+
+  <!--==========================
+      ENCABEZADO
+  ============================-->
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="m-0"><i class="bi bi-arrow-repeat me-1"></i> Autoasignación de Técnicos</h4>
+    <a class="btn btn-outline-secondary btn-sm" href="{% url 'maint_index' %}">Volver</a>
+  </div>
+
+
+  <!--==========================
+      MÉTRICAS
+  ============================-->
+  <div class="row g-3 mb-4">
+
+    <div class="col-md-3">
+      <div class="metric-box">
+        <div class="metric-title">Estado</div>
+        <div class="metric-value">
+          {% if cfg.enabled %}
+            <span class="text-success">Activa</span>
+          {% else %}
+            <span class="text-danger">Inactiva</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-3">
+      <div class="metric-box">
+        <div class="metric-title">Técnicos totales</div>
+        <div class="metric-value">{{ total_techs }}</div>
+      </div>
+    </div>
+
+    <div class="col-md-3">
+      <div class="metric-box">
+        <div class="metric-title">Participando</div>
+        <div class="metric-value">{{ techs_enabled }}</div>
+      </div>
+    </div>
+
+    <div class="col-md-3">
+      <div class="metric-box">
+        <div class="metric-title">Técnicos sin área</div>
+        <div class="metric-value text-warning">{{ techs_no_area }}</div>
+      </div>
+    </div>
+
+  </div>
+
+
+  <!--==========================
+      ADVERTENCIAS
+  ============================-->
+  {% if techs_no_area > 0 %}
+    <div class="alert alert-warning">
+      <i class="bi bi-exclamation-triangle"></i>
+      Hay <strong>{{ techs_no_area }}</strong> técnicos sin área. No podrán recibir tickets.
+    </div>
+  {% endif %}
+
+  {% if techs_enabled == 0 and total_techs > 0 %}
+    <div class="alert alert-danger">
+      <i class="bi bi-x-circle"></i>
+      Ningún técnico está marcado como “Autoasignable”.
+      La autoasignación no podrá funcionar.
+    </div>
+  {% endif %}
+
+
+  <!--==========================
+      CONFIGURACIÓN GLOBAL
+  ============================-->
+  <div class="mb-4">
+    <h6 class="fw-bold mb-2">Configuración general</h6>
+
+    <div class="d-flex align-items-center gap-3">
+      <label class="fw-semibold mb-0">Autoasignación activa:</label>
+      <input type="checkbox" id="autoassign-enabled" class="form-check-input switch-lg"
+             {% if cfg.enabled %}checked{% endif %}>
+
+      <span class="badge bg-secondary">
+        Modo: por área (Round Robin)
+      </span>
+    </div>
+  </div>
+
+
+  <!--==========================
+      REINICIAR ROUND ROBIN
+  ============================-->
+  <div class="mb-4">
+    <h6 class="fw-bold mb-2">Reiniciar Round Robin por área</h6>
+
+    <div class="d-flex gap-2">
+      <select id="rr-area" class="form-select" style="max-width:280px;">
+        {% for a in areas %}
+          <option value="{{ a.id }}">{{ a.name }}</option>
+        {% endfor %}
+      </select>
+
+      <button class="btn-rr" id="rr-reset-btn">
+        <i class="bi bi-arrow-clockwise"></i> Reiniciar
+      </button>
+    </div>
+
+    <div id="rr-msg" class="mt-2" style="display:none;"></div>
+  </div>
+
+
+
+  <!--==========================
+      TABLA PRINCIPAL
+  ============================-->
+  <h6 class="fw-bold mb-2">Técnicos participantes</h6>
+
+  <div class="table-responsive">
+    <table class="table-pro mb-3">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Usuario</th>
+          <th>Nombre</th>
+          <th>Área</th>
+          <th>Tickets activos</th>
+          <th>Carga</th>
+          <th>Activo</th>
+          <th>Autoasignable</th>
+          <th>Última asignación</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {% for t in techs %}
+        <tr>
+          <td>{{ t.id }}</td>
+          <td>{{ t.username }}</td>
+          <td>{{ t.fullname }}</td>
+
+          <td>
+            {% if t.area %}
+              {{ t.area }}
+            {% else %}
+              <span class="text-warning">Sin área</span>
+            {% endif %}
+          </td>
+
+          <td>{{ t.active_tickets }}</td>
+
+          <td>
+            {% if t.load_level == "low" %}
+              <span class="load-low">Baja</span>
+            {% elif t.load_level == "medium" %}
+              <span class="load-medium">Media</span>
+            {% else %}
+              <span class="load-high">Alta</span>
+            {% endif %}
+          </td>
+
+          <td>
+            {% if t.active %}
+              <span class="badge bg-success">Sí</span>
+            {% else %}
+              <span class="badge bg-danger">No</span>
+            {% endif %}
+          </td>
+
+          <td class="text-center">
+            <input type="checkbox"
+                   class="form-check-input switch-lg tech-flag"
+                   data-user-id="{{ t.id }}"
+                   {% if t.auto_assign %}checked{% endif %}>
+          </td>
+
+          <td>{{ t.last_rr }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <button class="btn-save" id="save-autoassign">Guardar cambios</button>
+
+
+
+  <!--==========================
+      HISTORIAL
+  ============================-->
+  <h5 class="mt-5 mb-3">Historial reciente de autoasignaciones</h5>
+
+  <div class="history-box">
+    {% if history %}
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Ticket</th>
+            <th>Área</th>
+            <th>Técnico asignado</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for log in history %}
+          <tr>
+            <td>{{ log.created_at|date:"d/m/Y H:i" }}</td>
+            <td>#{{ log.ticket.id }} - {{ log.ticket.title }}</td>
+            <td>{{ log.ticket.area }}</td>
+            <td>{{ log.meta_json.assigned_to }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="text-muted m-0">No hay autoasignaciones registradas.</p>
+    {% endif %}
+  </div>
+
+</div>
+
+
+
+<!--==========================
+    SCRIPTS
+============================-->
+<script>
+/* Guardar flags + enabled */
+document.getElementById("save-autoassign").addEventListener("click", function () {
+
+    const enabled = document.getElementById("autoassign-enabled").checked;
+
+    const flags = {};
+    document.querySelectorAll(".tech-flag").forEach(chk => {
+        flags[ chk.dataset.userId ] = chk.checked;
+    });
+
+    fetch("{% url 'autoassign_save' %}", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": "{{ csrf_token }}"
+        },
+        body: JSON.stringify({
+            enabled: enabled,
+            tech_flags: flags
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            alert("Configuración guardada correctamente.");
+        } else {
+            alert("Error: " + data.error);
+        }
+    })
+    .catch(() => alert("Error inesperado al guardar."));
+});
+
+
+
+/* Reset Round Robin */
+document.getElementById("rr-reset-btn").addEventListener("click", function () {
+
+    const areaId = document.getElementById("rr-area").value;
+
+    fetch("{% url 'reset_rr' %}", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": "{{ csrf_token }}"
+        },
+        body: JSON.stringify({ area_id: areaId })
+    })
+    .then(r => r.json())
+    .then(data => {
+        const msg = document.getElementById("rr-msg");
+        if (data.ok) {
+            msg.innerHTML = `<div class="alert alert-success">${data.msg}</div>`;
+        } else {
+            msg.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+        }
+        msg.style.display = "block";
+    });
+});
+</script>
+
+
+{% endblock %}

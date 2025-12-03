@@ -96,102 +96,76 @@
 <script>
 (function(){
 
-  // ---------------------------
-  // Helper apiFetch
-  // ---------------------------
-  if(typeof window.apiFetch!=="function"){
-    window.apiFetch = async function(url, opts={}){
-      const access = localStorage.getItem("access_token")
-      const finalUrl = url.startsWith("http") ? url : "/api" + url
-
-      const r = await fetch(finalUrl, {
-        ...opts,
-        headers:{
-          ...(opts.headers||{}),
-          Authorization:"Bearer "+access
-        }
-      })
-
-      if(r.status !== 401) return r
-
-      // Refresh
-      const refresh = localStorage.getItem("refresh_token")
-      if(!refresh) { localStorage.clear(); location.href="{% url 'login' %}"; return null }
-
-      const rr = await fetch("/api/token/refresh/", {
-        method:"POST",
-        headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ refresh })
-      })
-
-      if(!rr.ok){ localStorage.clear(); location.href="{% url 'login' %}"; return null }
-
-      const data = await rr.json()
-      localStorage.setItem("access_token", data.access)
-
-      return fetch(finalUrl, {
-        ...opts,
-        headers:{ ...(opts.headers||{}), Authorization:"Bearer "+data.access }
-      })
-    }
+  // ============================================================
+  // ALIAS: apiFetch → usa el cliente universal "api()" del base.html
+  // ============================================================
+  async function apiFetch(url, opts = {}){
+    return api(url, opts);  // usa JWT + CSRF + refresh automáticamente
   }
 
-  // ---------------------------
+  // ============================================================
   // DOM ELEMENTS
-  // ---------------------------
-  const rows = document.getElementById("rows")
-  const q = document.getElementById("q")
-  const globalMsg = document.getElementById("globalMsg")
-  const btnNew = document.getElementById("btnNew")
-  const btnReload = document.getElementById("btnReload")
+  // ============================================================
+  const rows = document.getElementById("rows");
+  const q = document.getElementById("q");
+  const globalMsg = document.getElementById("globalMsg");
+  const btnNew = document.getElementById("btnNew");
+  const btnReload = document.getElementById("btnReload");
 
-  const modalEl = document.getElementById("areaModal")
-  const modal = new bootstrap.Modal(modalEl)
+  const modalEl = document.getElementById("areaModal");
+  const modal = new bootstrap.Modal(modalEl);
 
-  const form = document.getElementById("areaForm")
-  const formAlert = document.getElementById("formAlert")
-  const modalTitle = document.getElementById("modalTitle")
-  const saveBtn = document.getElementById("saveBtn")
-  const f_name = document.getElementById("f_name")
+  const form = document.getElementById("areaForm");
+  const formAlert = document.getElementById("formAlert");
+  const modalTitle = document.getElementById("modalTitle");
+  const saveBtn = document.getElementById("saveBtn");
+  const f_name = document.getElementById("f_name");
 
-  let allAreas = []
-  let currentId = null
+  let allAreas = [];
+  let currentId = null;
 
-  // ---------------------------
+  // ============================================================
   // Helpers
-  // ---------------------------
-  function showMsg(text, ok){
-    globalMsg.textContent = text
-    globalMsg.className = "alert " + (ok ? "alert-success" : "alert-danger")
-    globalMsg.classList.remove("d-none")
-    setTimeout(()=>globalMsg.classList.add("d-none"), 2000)
+  // ============================================================
+  function esc(s){
+    return String(s||"").replace(/[&<>"']/g, m=>({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"
+    }[m]));
+  }
+
+  function showMsg(text, ok=true){
+    globalMsg.textContent = text;
+    globalMsg.className = "alert " + (ok ? "alert-success" : "alert-danger");
+    globalMsg.classList.remove("d-none");
+    setTimeout(()=>globalMsg.classList.add("d-none"),2000);
   }
 
   function showFormError(text){
-    formAlert.textContent = text
-    formAlert.classList.remove("d-none")
+    formAlert.textContent = text;
+    formAlert.classList.remove("d-none");
   }
   function hideFormError(){
-    formAlert.classList.add("d-none")
+    formAlert.classList.add("d-none");
   }
 
-  function esc(s){
-    return String(s||"").replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[m]))
-  }
-
-  // ---------------------------
-  // Render
-  // ---------------------------
+  // ============================================================
+  // Render tabla
+  // ============================================================
   function render(list){
     if(list.length === 0){
-      rows.innerHTML = `<tr><td colspan="3" class="text-center text-muted py-4">Sin áreas</td></tr>`
-      return
+      rows.innerHTML = `
+        <tr>
+          <td colspan="3" class="text-center text-muted py-4">
+            Sin áreas
+          </td>
+        </tr>`;
+      return;
     }
 
-    rows.innerHTML = ""
+    rows.innerHTML = "";
     list.forEach(a=>{
-      const tr = document.createElement("tr")
-      tr.dataset.id = a.id
+      const tr = document.createElement("tr");
+      tr.dataset.id = a.id;
       tr.innerHTML = `
         <td>${a.id}</td>
         <td>${esc(a.name)}</td>
@@ -203,122 +177,131 @@
             <i class="bi bi-trash"></i>
           </button>
         </td>
-      `
-      rows.appendChild(tr)
-    })
+      `;
+      rows.appendChild(tr);
+    });
   }
 
   function applyFilter(){
-    const term = (q.value||"").toLowerCase()
-    if(!term) return render(allAreas)
-    render(allAreas.filter(a => a.name.toLowerCase().includes(term)))
+    const term = (q.value||"").toLowerCase();
+    if(!term) return render(allAreas);
+    render(allAreas.filter(a => a.name.toLowerCase().includes(term)));
   }
 
-// ---------------------------
-// API
-// ---------------------------
-async function loadAreas(){
-  rows.innerHTML = `<tr><td colspan="3" class="text-center text-muted py-4">Cargando…</td></tr>`
-  const r = await apiFetch("/api/areas/")
-  if(!r) return
-  const data = await r.json()
-  allAreas = Array.isArray(data) ? data : data.results || []
-  applyFilter()
-}
+  // ============================================================
+  // API
+  // ============================================================
+  async function loadAreas(){
+    rows.innerHTML = `
+      <tr>
+        <td colspan="3" class="text-center text-muted py-4">Cargando…</td>
+      </tr>`;
 
-async function createArea(payload){
-  const r = await apiFetch("/api/areas/", {
-    method:"POST",
-    headers:{ "Content-Type":"application/json" },
-    body: JSON.stringify(payload)
-  })
-  const j = await r.json().catch(()=>{})
-  return { ok:r.ok, data:j, error:j?.detail || j?.error }
-}
+    const r = await apiFetch("/api/areas/");
+    if(!r.ok){
+      rows.innerHTML = `
+        <tr><td colspan="3" class="text-center text-danger py-4">Error cargando áreas</td></tr>`;
+      return;
+    }
 
-async function updateArea(id, payload){
-  const r = await apiFetch(`/api/areas/${id}/`, {
-    method:"PUT",
-    headers:{ "Content-Type":"application/json" },
-    body: JSON.stringify(payload)
-  })
-  const j = await r.json().catch(()=>{})
-  return { ok:r.ok, data:j, error:j?.detail }
-}
+    const data = await r.json();
+    allAreas = Array.isArray(data) ? data : data.results || [];
+    applyFilter();
+  }
 
-async function deleteArea(id){
-  const r = await apiFetch(`/api/areas/${id}/`, { method:"DELETE" })
-  if(r.status === 204) return { ok:true }
-  const j = await r.json().catch(()=>{})
-  return { ok:r.ok, error:j?.detail }
-}
+  async function createArea(payload){
+    const r = await apiFetch("/api/areas/", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify(payload)
+    });
+    const j = await r.json().catch(()=>{});
+    return { ok:r.ok, data:j, error:j?.detail || j?.error };
+  }
 
+  async function updateArea(id, payload){
+    const r = await apiFetch(`/api/areas/${id}/`, {
+      method:"PUT",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify(payload)
+    });
+    const j = await r.json().catch(()=>{});
+    return { ok:r.ok, data:j, error:j?.detail || j?.error };
+  }
 
-  // ---------------------------
+  async function deleteArea(id){
+    const r = await apiFetch(`/api/areas/${id}/`, { method:"DELETE" });
+    if(r.status === 204) return { ok:true };
+    const j = await r.json().catch(()=>{});
+    return { ok:r.ok, error:j?.detail };
+  }
+
+  // ============================================================
   // Eventos
-  // ---------------------------
-  q.addEventListener("input", applyFilter)
+  // ============================================================
+  q.addEventListener("input", applyFilter);
 
-  btnReload.addEventListener("click", loadAreas)
+  btnReload.addEventListener("click", loadAreas);
 
   btnNew.addEventListener("click", ()=>{
-    currentId = null
-    form.reset()
-    hideFormError()
-    modalTitle.textContent = "Nueva Área"
-    modal.show()
-  })
+    currentId = null;
+    form.reset();
+    hideFormError();
+    modalTitle.textContent = "Nueva Área";
+    modal.show();
+  });
 
   rows.addEventListener("click", async ev=>{
-    const btn = ev.target.closest("button[data-action]")
-    if(!btn) return
-    const id = Number(btn.closest("tr").dataset.id)
-    const area = allAreas.find(a => a.id === id)
-    if(!area) return
+    const btn = ev.target.closest("button[data-action]");
+    if(!btn) return;
+
+    const id = Number(btn.closest("tr").dataset.id);
+    const area = allAreas.find(a => a.id === id);
+    if(!area) return;
 
     if(btn.dataset.action === "edit"){
-      currentId = id
-      hideFormError()
-      f_name.value = area.name
-      modalTitle.textContent = "Editar Área"
-      modal.show()
+      currentId = id;
+      hideFormError();
+      f_name.value = area.name;
+      modalTitle.textContent = "Editar Área";
+      modal.show();
     }
     else if(btn.dataset.action === "del"){
-      if(!confirm(`¿Eliminar área "${area.name}"?`)) return
-      const res = await deleteArea(id)
-      if(!res.ok) return showMsg(res.error || "No se pudo eliminar", false)
-      showMsg("Área eliminada", true)
-      loadAreas()
+      if(!confirm(`¿Eliminar área "${area.name}"?`)) return;
+      const res = await deleteArea(id);
+      if(!res.ok) return showMsg(res.error || "No se pudo eliminar", false);
+      showMsg("Área eliminada", true);
+      loadAreas();
     }
-  })
+  });
 
   form.addEventListener("submit", async ev=>{
-    ev.preventDefault()
-    hideFormError()
-    saveBtn.disabled = true
+    ev.preventDefault();
+    hideFormError();
+    saveBtn.disabled = true;
 
-    const payload = {
-      name: f_name.value.trim(),
-    }
+    const payload = { name: f_name.value.trim() };
 
     const res = currentId
       ? await updateArea(currentId, payload)
-      : await createArea(payload)
+      : await createArea(payload);
 
-    saveBtn.disabled = false
+    saveBtn.disabled = false;
 
     if(!res.ok){
-      showFormError(res.error || "Error al guardar.")
-      return
+      showFormError(res.error || "Error al guardar.");
+      return;
     }
 
-    modal.hide()
-    showMsg(currentId ? "Área actualizada" : "Área creada", true)
-    loadAreas()
-  })
+    modal.hide();
+    showMsg(currentId ? "Área actualizada" : "Área creada", true);
+    loadAreas();
+  });
 
-  // Init
-  loadAreas()
+  // ============================================================
+  // INIT
+  // ============================================================
+  loadAreas();
 
 })();
 </script>

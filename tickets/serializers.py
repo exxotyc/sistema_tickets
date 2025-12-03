@@ -372,7 +372,7 @@ class FAQSerializer(serializers.ModelSerializer):
 
 
 # ==========================================================
-#   TICKET SERIALIZER (CON AREA)
+#   TICKET SERIALIZER (CON ÁREAS Y STATE_DISPLAY)
 # ==========================================================
 class TicketSerializer(serializers.ModelSerializer):
 
@@ -382,11 +382,23 @@ class TicketSerializer(serializers.ModelSerializer):
     )
     priority_name = serializers.CharField(source="priority.name", read_only=True)
 
-    # AREA
+    # ÁREA DEL TICKET
     area = serializers.PrimaryKeyRelatedField(
         queryset=Area.objects.all(), required=False, allow_null=True
     )
     area_name = serializers.CharField(source="area.name", read_only=True)
+
+    # ÁREA DEL SOLICITANTE
+    requester_area_name = serializers.CharField(
+        source="requester.profile.area.name",
+        read_only=True
+    )
+
+    # ÁREA DEL TÉCNICO ASIGNADO
+    assigned_to_area_name = serializers.CharField(
+        source="assigned_to.profile.area.name",
+        read_only=True
+    )
 
     # ASIGNACIÓN
     assigned_to = serializers.PrimaryKeyRelatedField(
@@ -406,6 +418,9 @@ class TicketSerializer(serializers.ModelSerializer):
     requester_username = serializers.CharField(source="requester.username", read_only=True)
     assigned_to_username = serializers.CharField(source="assigned_to.username", read_only=True)
 
+    # ESTADO LEGIBLE
+    state_display = serializers.SerializerMethodField()
+
     class Meta:
         model = Ticket
         fields = [
@@ -413,25 +428,45 @@ class TicketSerializer(serializers.ModelSerializer):
             "title",
             "description",
             "asset_id",
+
+            # Estado
+            "state",
+            "state_display",
+
+            # Prioridad
             "priority",
             "priority_name",
+
+            # Área del ticket
             "area",
             "area_name",
-            "state",
+
+            # Áreas de usuarios
+            "requester_area_name",
+            "assigned_to_area_name",
+
+            # Usuarios
             "requester",
             "requester_username",
             "assigned_to",
             "assigned_to_username",
+
             "assignment_reason",
+
+            # Categoría
             "category",
             "category_name",
+
+            # Fechas
             "created_at",
             "updated_at",
             "frt_due_at",
             "resolve_due_at",
             "due_at",
+
             "breach_risk",
         ]
+
         read_only_fields = [
             "id",
             "requester",
@@ -440,11 +475,26 @@ class TicketSerializer(serializers.ModelSerializer):
             "category_name",
             "priority_name",
             "area_name",
+            "requester_area_name",
+            "assigned_to_area_name",
             "created_at",
             "updated_at",
             "due_at",
             "breach_risk",
+            "state_display",
         ]
+
+    # ------------------------------------------------------
+    #   STATE DISPLAY — Traducción del estado
+    # ------------------------------------------------------
+    def get_state_display(self, obj):
+        MAP = {
+            "open": "Abierto",
+            "in_progress": "En progreso",
+            "resolved": "Resuelto",
+            "closed": "Cerrado",
+        }
+        return MAP.get(obj.state, obj.state)
 
     # ------------------------------------------------------
     #   UPDATE — REASIGNACIÓN & PROTECCIÓN
@@ -481,6 +531,7 @@ class TicketSerializer(serializers.ModelSerializer):
                 validated_data.pop(f, None)
 
         return super().update(instance, validated_data)
+
 
 
 # ==========================================================
