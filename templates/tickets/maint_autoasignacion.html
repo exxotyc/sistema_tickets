@@ -85,6 +85,18 @@
     background: rgba(255,255,255,.78);
   }
 
+
+
+    .toast-custom {
+      opacity: 0;
+      transform: translateY(20px);
+      transition: all .4s ease;
+  }
+  .toast-custom.show {
+      opacity: 1;
+      transform: translateY(0);
+}
+
 </style>
 {% endblock %}
 
@@ -307,6 +319,9 @@
       <p class="text-muted m-0">No hay autoasignaciones registradas.</p>
     {% endif %}
   </div>
+  <!-- Contenedor Toasts -->
+    <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toast-container"></div>
+
 
 </div>
 
@@ -316,65 +331,92 @@
     SCRIPTS
 ============================-->
 <script>
-/* Guardar flags + enabled */
-document.getElementById("save-autoassign").addEventListener("click", function () {
+/* Protección para evitar listeners duplicados */
+if (!window.autoassignListenerLoaded) {
+    window.autoassignListenerLoaded = true;
 
-    const enabled = document.getElementById("autoassign-enabled").checked;
+    /* Guardar flags + enabled */
+    document.getElementById("save-autoassign").addEventListener("click", function () {
 
-    const flags = {};
-    document.querySelectorAll(".tech-flag").forEach(chk => {
-        flags[ chk.dataset.userId ] = chk.checked;
-    });
+        const enabled = document.getElementById("autoassign-enabled").checked;
 
-    fetch("{% url 'autoassign_save' %}", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "X-CSRFToken": "{{ csrf_token }}"
-        },
-        body: JSON.stringify({
-            enabled: enabled,
-            tech_flags: flags
+        const flags = {};
+        document.querySelectorAll(".tech-flag").forEach(chk => {
+            flags[ chk.dataset.userId ] = chk.checked;
+        });
+
+        fetch("{% url 'autoassign_save' %}", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRFToken": "{{ csrf_token }}"
+            },
+            body: JSON.stringify({
+                enabled: enabled,
+                tech_flags: flags
+            })
         })
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.ok) {
-            alert("Configuración guardada correctamente.");
-        } else {
-            alert("Error: " + data.error);
-        }
-    })
-    .catch(() => alert("Error inesperado al guardar."));
-});
-
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok) {
+                showToast("Configuración guardada correctamente", "success");
+            } else {
+                showToast("Error: " + data.error, "danger");
+            }
+        })
+        .catch(() => showToast("Error inesperado al guardar", "danger"));
+    });
+}
 
 
 /* Reset Round Robin */
-document.getElementById("rr-reset-btn").addEventListener("click", function () {
+if (!window.resetRRListenerLoaded) {
+    window.resetRRListenerLoaded = true;
 
-    const areaId = document.getElementById("rr-area").value;
+    document.getElementById("rr-reset-btn").addEventListener("click", function () {
+        const areaId = document.getElementById("rr-area").value;
 
-    fetch("{% url 'reset_rr' %}", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "X-CSRFToken": "{{ csrf_token }}"
-        },
-        body: JSON.stringify({ area_id: areaId })
-    })
-    .then(r => r.json())
-    .then(data => {
-        const msg = document.getElementById("rr-msg");
-        if (data.ok) {
-            msg.innerHTML = `<div class="alert alert-success">${data.msg}</div>`;
-        } else {
-            msg.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
-        }
-        msg.style.display = "block";
+        fetch("{% url 'reset_rr' %}", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRFToken": "{{ csrf_token }}"
+            },
+            body: JSON.stringify({ area_id: areaId })
+        })
+        .then(r => r.json())
+        .then(data => {
+            const msg = document.getElementById("rr-msg");
+            if (data.ok) {
+                msg.innerHTML = `<div class="alert alert-success">${data.msg}</div>`;
+            } else {
+                msg.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+            }
+            msg.style.display = "block";
+        });
     });
-});
+}
+
+
+/* TOASTS */
+function showToast(message, color = "primary") {
+    const container = document.getElementById("toast-container");
+
+    const toast = document.createElement("div");
+    toast.className = `toast-custom text-white bg-${color} rounded shadow p-3 mb-2`;
+    toast.innerHTML = message;
+
+    container.appendChild(toast);
+
+    setTimeout(() => toast.classList.add("show"), 10);
+
+    setTimeout(() => {
+        toast.classList.remove("show");
+        setTimeout(() => toast.remove(), 400);
+    }, 3000);
+}
 </script>
+
 
 
 {% endblock %}

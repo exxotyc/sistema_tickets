@@ -18,19 +18,31 @@ User = get_user_model()
 
 
 # ======================================================
+#     OBTENER CONFIGURACIÓN ÚNICA (SINGLETON)
+# ======================================================
+def get_autoassign_config():
+    """
+    Garantiza que SIEMPRE exista un solo registro de configuración.
+    """
+    cfg, _ = AutoAssignConfig.objects.get_or_create(
+        id=1,
+        defaults={"enabled": False}
+    )
+    cfg.refresh_from_db()
+    return cfg
+
+
+
+# ======================================================
 #     VISTA PRINCIPAL (PRO)
 # ======================================================
 @login_required
 def maint_autoassign_page(request):
     if not request.user.groups.filter(name="admin").exists():
         return render(request, "tickets/403.html", status=403)
-
-    # Configuración global
-    cfg = AutoAssignConfig.objects.first()
-    if cfg:
-        cfg.refresh_from_db()
-    else:
-        cfg = AutoAssignConfig.objects.create(enabled=True)
+    
+    # Config global (singleton)
+    cfg = get_autoassign_config()
 
     # Lista de técnicos
     techs_qs = (
@@ -109,6 +121,7 @@ def maint_autoassign_page(request):
 
 
 
+
 # ======================================================
 #     GUARDAR CONFIG (ON/OFF + FLAGS)
 # ======================================================
@@ -123,28 +136,33 @@ def autoassign_save(request):
     except:
         return JsonResponse({"ok": False, "error": "JSON inválido"}, status=400)
 
-    # Leer valores del JSON
     enabled = data.get("enabled", False)
     flags = data.get("tech_flags", {})
 
-    # Obtener configuración
-    cfg = AutoAssignConfig.objects.first()
-    if not cfg:
-        cfg = AutoAssignConfig.objects.create(enabled=True)
+    cfg = get_autoassign_config()
 
-    # Normalizar booleano de forma universal
-    enabled_normalized = str(enabled).strip().lower() in ["1", "true", "on", "yes"]
+    # Normalizar boolean universal (funciona con cualquier valor)
+    if isinstance(enabled, bool):
+        enabled_normalized = enabled
+    else:
+        enabled_normalized = str(enabled).strip().lower() in ["1", "true", "on", "yes"]
 
-    # Guardar
     cfg.enabled = enabled_normalized
     cfg.save()
 
-    # Guardar técnicos autoasignables
+    # Guardar flags de técnicos
     for user_id, flag in flags.items():
         try:
             profile = UserProfile.objects.get(user_id=user_id)
-            profile.auto_assign_enabled = str(flag).strip().lower() in ["1", "true", "on", "yes"]
+
+            if isinstance(flag, bool):
+                normalized_flag = flag
+            else:
+                normalized_flag = str(flag).strip().lower() in ["1", "true", "on", "yes"]
+
+            profile.auto_assign_enabled = normalized_flag
             profile.save()
+
         except UserProfile.DoesNotExist:
             continue
 
@@ -167,7 +185,6 @@ def reset_rr(request):
     except:
         return JsonResponse({"ok": False, "error": "Datos inválidos"}, status=400)
 
-    # Validación si es vacío ("")
     if not area_id:
         return JsonResponse({"ok": False, "error": "Debe seleccionar un área."}, status=400)
 

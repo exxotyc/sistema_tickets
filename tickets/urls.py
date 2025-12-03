@@ -115,8 +115,7 @@ web_urlpatterns = [
     # FAQ (🔥 mantenedor FAQ)
     path("mantenedor/faq/", views.maint_faq, name="maint_faq"),
 
-    # ESTE SIEMPRE AL FINAL (genérico)
-    path("mantenedor/<slug:code>/", views.maint_section, name="maint_section"),
+    
 
     # ============================================================
     #   REPORTES / MÉTRICAS / SISTEMA
@@ -147,6 +146,8 @@ web_urlpatterns = [
     path("mantenedor/autoasignacion/save/", views_autoassign.autoassign_save, name="autoassign_save"),
     path("mantenedor/autoasignacion/reset_rr/", views_autoassign.reset_rr, name="reset_rr"),
 
+    # ESTE SIEMPRE AL FINAL (genérico)
+    path("mantenedor/<slug:code>/", views.maint_section, name="maint_section"),
 
     
 ]
