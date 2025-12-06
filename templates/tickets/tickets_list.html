@@ -26,10 +26,40 @@
   .table td {
     vertical-align: middle;
   }
+
+  .scroll-area {
+    max-height: 600px;
+    overflow-y: auto;
+  }
+  .scroll-area::-webkit-scrollbar {
+    width: 8px;
+  }
+  .scroll-area::-webkit-scrollbar-thumb {
+    background: rgba(0,0,0,.2);
+    border-radius: 4px;
+  }
+  .scroll-area::-webkit-scrollbar-track {
+    background: rgba(0,0,0,.05);
+  }
 </style>
 {% endblock %}
 
 {% block content %}
+
+{% if from_reports %}
+<div class="glass mb-3 p-3 d-flex justify-content-between align-items-center">
+    
+    <h1 class="h5 m-0 d-flex align-items-center gap-2">
+        <i class="bi bi-filter-circle text-primary"></i>
+        Tickets {{ state_pretty }} ({{ state_count }})
+    </h1>
+
+    <a href="{% url 'reports_page' %}" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-arrow-left"></i> Volver a reportes
+    </a>
+
+</div>
+{% endif %}
 
 <div class="glass mb-3">
   <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -48,8 +78,17 @@
      FILTROS AVANZADOS
 ============================= -->
 <div class="glass mb-3">
-  <form method="get" action="{% url 'ticket_list' %}" class="row g-2 align-items-end">
 
+  <!-- FORMULARIO CORREGIDO PARA MANTENER mine=1 -->
+  <form method="get"
+        action="{% if mine %}{% url 'ticket_list' %}?mine=1{% else %}{% url 'ticket_list' %}{% endif %}"
+        class="row g-2 align-items-end">
+
+    {% if mine %}
+      <input type="hidden" name="mine" value="1">
+    {% endif %}
+
+    <!-- Categoría -->
     <div class="col-md-2">
       <label class="form-label">Categoría</label>
       <select name="category" class="form-select form-select-sm">
@@ -62,6 +101,7 @@
       </select>
     </div>
 
+    <!-- Prioridad -->
     <div class="col-md-2">
       <label class="form-label">Prioridad</label>
       <select name="priority" class="form-select form-select-sm">
@@ -74,6 +114,7 @@
       </select>
     </div>
 
+    <!-- Estado -->
     <div class="col-md-2">
       <label class="form-label">Estado</label>
       <select name="state" class="form-select form-select-sm">
@@ -85,18 +126,22 @@
       </select>
     </div>
 
+    <!-- Filtro Asignado: solo si NO estamos en "Mis tickets" -->
+    {% if not mine %}
     <div class="col-md-2">
       <label class="form-label">Asignado</label>
       <select name="assignee" class="form-select form-select-sm">
         <option value="">Todos</option>
-        {% for t in assignees %}
-        <option value="{{ t.id }}" {% if assignee == t.id|stringformat:'s' %}selected{% endif %}>
-          {{ t.username }}
+        {% for u in assignees %}
+        <option value="{{ u.id }}" {% if assignee == u.id|stringformat:'s' %}selected{% endif %}>
+          {{ u.username }}
         </option>
         {% endfor %}
       </select>
     </div>
+    {% endif %}
 
+    <!-- Fechas -->
     <div class="col-md-2">
       <label class="form-label">Desde</label>
       <input type="date" name="from" value="{{ from }}" class="form-control form-control-sm">
@@ -107,6 +152,7 @@
       <input type="date" name="to" value="{{ to }}" class="form-control form-control-sm">
     </div>
 
+    <!-- Buscar -->
     <div class="col-md-3">
       <label class="form-label">Buscar</label>
       <input type="text" name="q" value="{{ q }}" class="form-control form-control-sm"
@@ -124,7 +170,9 @@
      TABLA DE TICKETS
 ============================= -->
 <div class="glass">
-  <div class="table-responsive">
+
+  <div class="scroll-area table-responsive">
+
     <table class="table table-hover align-middle">
       <thead class="table-light">
         <tr>
@@ -171,6 +219,7 @@
             </a>
           </td>
         </tr>
+
         {% empty %}
         <tr>
           <td colspan="8" class="text-center text-muted py-4">
@@ -181,6 +230,7 @@
 
       </tbody>
     </table>
+
   </div>
 </div>
 

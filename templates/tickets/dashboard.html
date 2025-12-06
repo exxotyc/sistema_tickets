@@ -411,47 +411,65 @@
             </div>
           </div>
         </a>
-
-        {% if is_tecnico %}
-        <!-- Mis tickets (técnico) -->
-        <a href="{% url 'ticket_list_assigned' %}" class="qa-item btn-ripple">
-          <div class="d-flex justify-content-between align-items-start">
+{% if is_tecnico %}
+    <!-- Mis tickets (solo los asignados al técnico) -->
+    <a href="{% url 'ticket_list' %}?mine=1" class="qa-item btn-ripple">
+        <div class="d-flex justify-content-between align-items-start">
             <div>
-              <div class="qa-title">Mis tickets</div>
-              <div class="qa-desc">Vista sólo con tus tickets.</div>
+                <div class="qa-title">Mis tickets</div>
+                <div class="qa-desc">Solo los tickets asignados a ti.</div>
             </div>
             <div class="qa-icon text-primary">
-              <i class="bi bi-person-check-fill"></i>
+                <i class="bi bi-person-check-fill"></i>
             </div>
-          </div>
-        </a>
+        </div>
+    </a>
 
-        <!-- Todos los tickets -->
-        <a href="{% url 'ticket_list_all' %}" class="qa-item btn-ripple">
-          <div class="d-flex justify-content-between align-items-start">
-            <div>
-              <div class="qa-title">Todos los tickets</div>
-              <div class="qa-desc">Visión global del soporte.</div>
-            </div>
-            <div class="qa-icon text-warning">
-              <i class="bi bi-collection-fill"></i>
-            </div>
+
+          {% if is_admin or is_tecnico %}
+      <a href="{% url 'ticket_list_all' %}" class="qa-item btn-ripple">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <div class="qa-title">Todos los tickets</div>
+            <div class="qa-desc">Listado completo del sistema.</div>
           </div>
-        </a>
-        {% else %}
-        <!-- Mis solicitudes para usuarios normales -->
-        <a href="{% url 'ticket_list' %}" class="qa-item btn-ripple">
-          <div class="d-flex justify-content-between align-items-start">
+          <div class="qa-icon text-warning">
+            <i class="bi bi-collection-fill"></i>
+          </div>
+        </div>
+      </a>
+      {% endif %}
+
+
+{% elif is_admin %}
+    <!-- Mis tickets = tickets donde el admin es el requester -->
+    <a href="{% url 'ticket_list' %}?mine=1" class="qa-item btn-ripple">
+        <div class="d-flex justify-content-between align-items-start">
             <div>
-              <div class="qa-title">Mis tickets</div>
-              <div class="qa-desc">Historial de tus solicitudes.</div>
+                <div class="qa-title">Mis tickets</div>
+                <div class="qa-desc">Tickets creados por ti.</div>
             </div>
             <div class="qa-icon text-primary">
-              <i class="bi bi-person-lines-fill"></i>
+                <i class="bi bi-person-lines-fill"></i>
             </div>
-          </div>
-        </a>
-        {% endif %}
+        </div>
+    </a>
+
+{% else %}
+    <!-- Usuario normal -->
+    <a href="{% url 'ticket_list' %}" class="qa-item btn-ripple">
+        <div class="d-flex justify-content-between align-items-start">
+            <div>
+                <div class="qa-title">Mis tickets</div>
+                <div class="qa-desc">Historial de tus solicitudes.</div>
+            </div>
+            <div class="qa-icon text-primary">
+                <i class="bi bi-person-lines-fill"></i>
+            </div>
+        </div>
+    </a>
+{% endif %}
+
 
         <!-- FAQ -->
         <a href="{% url 'faq' %}" class="qa-item btn-ripple">
@@ -602,15 +620,16 @@
 <script>
 (function(){
 
-  // 🔗 Alias: hacemos que todo lo que use apiFetch internamente llame a api()
-  // api() viene definido en base.html (global)
+  // =============================
+  //  Helper API
+  // =============================
   async function apiFetch(url, opts = {}){
-    return api(url, opts);
+    return api(url, opts); // api() viene de base.html
   }
 
   function esc(s){
     return String(s||"").replace(/[&<>"']/g, m => ({
-      "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
+      "&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;"
     }[m]));
   }
 
@@ -639,67 +658,65 @@
     const target = Number(toValue) || 0;
     const duration = 700;
     const startTime = performance.now();
-    const from = 0;
 
     function tick(now){
       const progress = Math.min((now - startTime) / duration, 1);
-      const value = Math.round(from + (target - from) * progress);
-      el.textContent = value;
-      if(progress < 1){
-        requestAnimationFrame(tick);
-      }
+      el.textContent = Math.round(target * progress);
+      if(progress < 1) requestAnimationFrame(tick);
     }
     requestAnimationFrame(tick);
   }
 
+  // ======================================================
+  //                 CARGAR DASHBOARD
+  // ======================================================
   async function loadDashboard(){
     try{
-      // 1) stats → usuario + roles
-      const rStats = await apiFetch("/api/stats/");
-      if(!rStats.ok){
-        console.error("No se pudo cargar /api/stats/", rStats.status);
-        return;
-      }
-      const stats = await rStats.json();
-      const user = stats.user || null;
-      const userId = user ? user.id : null;
-      const roles = (user && user.roles) || [];
 
-      const isAdmin  = roles.includes("admin");
-      const isTech   = roles.includes("tecnico");
-      const isSolic  = roles.includes("usuario");
+      // --------------------------------------------------
+      // 1) Usuario + roles
+      // --------------------------------------------------
+      const rStats = await apiFetch("/api/stats/");
+      if(!rStats.ok) return;
+      const stats = await rStats.json();
+
+      const user   = stats.user || null;
+      const userId = user ? user.id : null;
+      const roles  = (user && user.roles) || [];
+
+      const isAdmin = roles.includes("admin");
+      const isTech  = roles.includes("tecnico");
 
       // Nombre en hero
-      if(user && user.username){
-        const g = document.getElementById("heroName");
-        if(g) g.textContent = user.username;
+      const nameEl = document.getElementById("heroName");
+      if(nameEl && user && user.username){
+        nameEl.textContent = user.username;
       }
 
-      // Texto rol
+      // Rol visible
       const heroRoleLabel = document.getElementById("heroRoleLabel");
       if(heroRoleLabel){
-        if(isAdmin) heroRoleLabel.textContent = "Administrador";
-        else if(isTech) heroRoleLabel.textContent = "Técnico";
-        else heroRoleLabel.textContent = "Solicitante";
+        if(isAdmin)      heroRoleLabel.textContent = "Administrador";
+        else if(isTech)  heroRoleLabel.textContent = "Técnico";
+        else             heroRoleLabel.textContent = "Solicitante";
       }
 
-      // 2) tickets
+      // --------------------------------------------------
+      // 2) Tickets
+      // --------------------------------------------------
       const rTickets = await apiFetch("/api/tickets/?ordering=-updated_at&page_size=200");
-      if(!rTickets.ok){
-        console.error("No se pudo cargar /api/tickets/", rTickets.status);
-        return;
-      }
+      if(!rTickets.ok) return;
       const raw = await rTickets.json();
       const tickets = Array.isArray(raw) ? raw : (raw.results || []);
 
-      // "Mis tickets" depende del rol
+      // Tickets según rol:
+      //  - Técnicos → asignados a él
+      //  - Admin / solicitante → creados por él
       let myTickets = [];
-      if(userId){
-        if(isTech || isAdmin){
-          myTickets = tickets.filter(t => t.assigned_to === userId);
-        }else{
-          myTickets = tickets.filter(t => t.requester === userId);
-        }
+      if(isTech){
+        myTickets = tickets.filter(t => t.assigned_to === userId);
+      } else {
+        myTickets = tickets.filter(t => t.requester === userId);
       }
 
       const now = new Date();
@@ -712,38 +729,25 @@
       const today = new Date();
       const myResolvedToday = myResolved.filter(t => {
         if(!t.updated_at) return false;
-        const d = new Date(t.updated_at);
-        return d.toDateString() === today.toDateString();
+        const dt = new Date(t.updated_at);
+        return dt.toDateString() === today.toDateString();
       });
 
       const myRisk = myTickets.filter(t => {
         if(!t.resolve_due_at) return false;
         const due = new Date(t.resolve_due_at);
-        const diffHours = (due - now) / 36e5;
+        const diffHours = (due - now) / 36e5; // ms → horas
         return diffHours > 0 && diffHours <= 24;
       });
 
-      // Tickets sin asignar (solo admin/tecs)
+      // Tickets sin asignar (solo admin / técnico)
       const unassigned = (isAdmin || isTech)
-        ? tickets.filter(t => !t.assigned_to && (t.state === "open" || t.state === "in_progress"))
+        ? tickets.filter(t => !t.assigned_to && ["open","in_progress"].includes(t.state))
         : [];
 
-      // KPI: labels
-      const kpi1Label = document.getElementById("kpi1Label");
-      const myOpenTitle = document.getElementById("myOpenTitle");
-      const activityTitleHint = document.getElementById("activityTitleHint");
-
-      if(isAdmin || isTech){
-        if(kpi1Label) kpi1Label.textContent = "Mis tickets abiertos asignados";
-        if(myOpenTitle) myOpenTitle.textContent = "Mis tickets abiertos";
-        if(activityTitleHint) activityTitleHint.textContent = "Últimos movimientos en tickets asignados a ti.";
-      }else{
-        if(kpi1Label) kpi1Label.textContent = "Mis solicitudes abiertas";
-        if(myOpenTitle) myOpenTitle.textContent = "Mis solicitudes abiertas";
-        if(activityTitleHint) activityTitleHint.textContent = "Últimos cambios en tus solicitudes.";
-      }
-
-      // KPI: valores (con contador animado)
+      // --------------------------------------------------
+      // 3) KPIs
+      // --------------------------------------------------
       animateCounter(document.getElementById("kpiMyOpen"),          myOpen.length);
       animateCounter(document.getElementById("kpiMyInProgress"),    myInProg.length);
       animateCounter(document.getElementById("kpiMyResolvedToday"), myResolvedToday.length);
@@ -759,46 +763,52 @@
         }
       }
 
-      // Tabla "Mis tickets abiertos / solicitudes"
+      // --------------------------------------------------
+      // 4) Tabla "Mis tickets abiertos"
+      // --------------------------------------------------
       const tbody = document.getElementById("tblMyOpenBody");
-      const label = document.getElementById("myOpenCountLabel");
-      if(label) label.textContent = myOpen.length + " ticket(s)";
+      const lbl   = document.getElementById("myOpenCountLabel");
+      if(lbl) lbl.textContent = myOpen.length + " ticket(s)";
 
       if(!myOpen.length){
-        tbody.innerHTML = '<tr><td colspan="5" class="text-muted text-center py-3 small">No tienes tickets abiertos actualmente.</td></tr>';
-      }else{
+        tbody.innerHTML = `
+          <tr><td colspan="5" class="text-muted text-center py-3 small">
+            No tienes tickets abiertos actualmente.
+          </td></tr>
+        `;
+      } else {
         tbody.innerHTML = "";
         myOpen.slice(0, 10).forEach(t => {
           const tr = document.createElement("tr");
 
-          let badgeCls = "badge-soft-state badge-soft-open";
-          let text = "Abierto";
-          if(t.state === "in_progress"){ badgeCls="badge-soft-state badge-soft-inp"; text="En progreso"; }
-          else if(t.state === "resolved"){ badgeCls="badge-soft-state badge-soft-res"; text="Resuelto"; }
-          else if(t.state === "closed"){ badgeCls="badge-soft-state badge-soft-clo"; text="Cerrado"; }
+          const stateMap = {
+            open:        ["badge-soft-state badge-soft-open", "Abierto"],
+            in_progress: ["badge-soft-state badge-soft-inp",  "En progreso"],
+            resolved:    ["badge-soft-state badge-soft-res",  "Resuelto"],
+            closed:      ["badge-soft-state badge-soft-clo",  "Cerrado"],
+          };
+          const [cls, txt] = stateMap[t.state] || ["badge-soft-state", t.state];
 
           tr.innerHTML = `
             <td>#${t.id}</td>
             <td>${esc(t.title || "Sin título")}</td>
-            <td><span class="${badgeCls}">${text}</span></td>
+            <td><span class="${cls}">${txt}</span></td>
             <td>${esc(t.priority_name || "—")}</td>
             <td>${esc(t.area_name || "—")}</td>
           `;
+          tr.onclick = () => window.location.href = `/tickets/${t.id}/`;
           tbody.appendChild(tr);
         });
       }
 
-      // Actividad reciente
+      // --------------------------------------------------
+      // 5) Actividad reciente
+      // --------------------------------------------------
       const recentWrap = document.getElementById("recentList");
       if(recentWrap){
         recentWrap.innerHTML = "";
         myTickets.slice(0, 12).forEach((t, idx) => {
-          let labelTxt = "Actualizado";
-          if(t.state === "open") labelTxt = "Abierto";
-          else if(t.state === "in_progress") labelTxt = "En progreso";
-          else if(t.state === "resolved") labelTxt = "Resuelto";
-          else if(t.state === "closed") labelTxt = "Cerrado";
-
+          const dt = fmtDate(t.updated_at || t.created_at);
           const row = document.createElement("div");
           row.className = "activity-item";
           row.style.animationDelay = (idx * 0.03) + "s";
@@ -807,122 +817,188 @@
               <div>
                 <strong>#${t.id}</strong> · ${esc(t.title || "")}
                 <div class="text-muted small">
-                  ${labelTxt} · ${esc(t.area_name || "Sin área")}
+                  ${esc(t.area_name || "Sin área")}
                 </div>
               </div>
-              <small class="text-muted">${fmtDate(t.updated_at || t.created_at)}</small>
+              <small class="text-muted">${dt}</small>
             </div>
           `;
+          row.onclick = () => window.location.href = `/tickets/${t.id}/`;
           recentWrap.appendChild(row);
         });
 
         if(!myTickets.length){
-          recentWrap.innerHTML = '<div class="text-muted small py-2">Sin actividad reciente en tus tickets.</div>';
+          recentWrap.innerHTML =
+            '<div class="text-muted small py-2">Sin actividad reciente en tus tickets.</div>';
         }
       }
 
-      // GRÁFICOS
+      // ======================================================
+      // 6) GRÁFICOS
+      // ======================================================
+
       const ctxState = document.getElementById("chartState");
       const ctxPrio  = document.getElementById("chartPriority");
 
-      const countsByState = {open:0, in_progress:0, resolved:0, closed:0};
-      myTickets.forEach(t => {
-        if(countsByState.hasOwnProperty(t.state)){
-          countsByState[t.state]++;
-        }
-      });
+      // ------------------------------------------------------
+      //        GRÁFICO POR ESTADO (DOUGHNUT)
+      // ------------------------------------------------------
+      if (ctxState) {
 
-      if(ctxState){
+        ctxState.style.opacity = "0";
+        ctxState.style.transform = "scale(0.85)";
+        ctxState.style.transition = "opacity .6s ease, transform .6s ease";
+
+        const counts = {
+          open:        myOpen.length,
+          in_progress: myInProg.length,
+          resolved:    myResolved.length,
+          closed:      myClosed.length
+        };
+
         const chartState = new Chart(ctxState, {
-          type:"doughnut",
-          data:{
-            labels:["Abierto","En progreso","Resuelto","Cerrado"],
-            datasets:[{
-              data:[
-                countsByState.open,
-                countsByState.in_progress,
-                countsByState.resolved,
-                countsByState.closed
+          type: "doughnut",
+          data: {
+            labels: ["Abierto", "En progreso", "Resuelto", "Cerrado"],
+            datasets: [{
+              data: [
+                counts.open,
+                counts.in_progress,
+                counts.resolved,
+                counts.closed
               ],
-              backgroundColor:[
+              backgroundColor: [
                 "rgba(248,113,113,.9)",
                 "rgba(250,204,21,.9)",
                 "rgba(59,130,246,.9)",
                 "rgba(34,197,94,.9)"
               ],
-              borderWidth:1,
-              borderColor:"rgba(15,23,42,.1)"
+              borderWidth: 1,
+              borderColor: "rgba(15,23,42,.1)"
             }]
           },
-          options:{
-            animation:{
-              duration:900,
-              easing:"easeOutCubic",
-              animateScale:true,
-              animateRotate:true,
-              onComplete: function(){
-                ctxState.style.opacity = "1";
+          options: {
+            animation: {
+              duration: 900,
+              easing: "easeOutCubic",
+              animateScale: true,
+              animateRotate: true,
+              onComplete: () => {
+                setTimeout(() => {
+                  ctxState.style.opacity = "1";
+                  ctxState.style.transform = "scale(1)";
+                }, 80);
               }
             },
-            plugins:{
-              legend:{ position:"bottom", labels:{ boxWidth:14 } }
+            plugins: {
+              legend: { position: "bottom" }
             },
-            responsive:true,
-            maintainAspectRatio:false
+            responsive: true,
+            maintainAspectRatio: false,
+
+            // CLICK → IR A ESTADO (siempre con mine=1 desde dashboard)
+            onClick: (evt, els) => {
+              if (!els.length) return;
+              const idx = els[0].index;
+              const map = ["open","in_progress","resolved","closed"];
+              const code = map[idx];
+              window.location.href = `/tickets/estado/${code}/?mine=1`;
+            }
           }
         });
-        // Por si acaso, si la animación no dispara onComplete
-        setTimeout(()=>{ ctxState.style.opacity = "1"; }, 1000);
+
+        // Fallback por si onComplete no se dispara
+        setTimeout(() => {
+          ctxState.style.opacity = "1";
+          ctxState.style.transform = "scale(1)";
+        }, 1000);
       }
 
-      const activeTickets = myTickets.filter(t => t.state === "open" || t.state === "in_progress");
-      const prioCounts = {};
-      activeTickets.forEach(t => {
-        const key = t.priority_name || "Sin prioridad";
-        prioCounts[key] = (prioCounts[key] || 0) + 1;
-      });
+      // ------------------------------------------------------
+      //        GRÁFICO POR PRIORIDAD (BARRAS)
+      // ------------------------------------------------------
+      if (ctxPrio) {
 
-      if(ctxPrio){
+        ctxPrio.style.opacity = "0";
+        ctxPrio.style.transition = "opacity .6s ease";
+
+        // Prioridades sólo de tickets abiertos + en progreso
+        const activeTickets = myTickets.filter(t =>
+          ["open", "in_progress"].includes(t.state)
+        );
+
+        const prioCounts = {};
+        activeTickets.forEach(t => {
+          const key = t.priority_name || "Sin prioridad";
+          prioCounts[key] = (prioCounts[key] || 0) + 1;
+        });
+
         const labelsPrio = Object.keys(prioCounts);
         const valuesPrio = Object.values(prioCounts);
 
+        const priorityMap = {
+          "Crítica": "critical",
+          "Alta": "high",
+          "Media": "medium",
+          "Baja": "low",
+          "Sin prioridad": ""
+        };
+
         const chartPrio = new Chart(ctxPrio, {
-          type:"bar",
-          data:{
+          type: "bar",
+          data: {
             labels: labelsPrio,
-            datasets:[{
+            datasets: [{
               data: valuesPrio,
-              backgroundColor:"rgba(59,130,246,.85)",
-              borderColor:"rgba(30,64,175,1)",
-              borderWidth:1,
-              borderRadius:4
+              backgroundColor: "rgba(59,130,246,.85)",
+              borderColor: "rgba(30,64,175,1)",
+              borderWidth: 1,
+              borderRadius: 4
             }]
           },
-          options:{
-            animation:{
-              duration:800,
-              easing:"easeOutCubic",
-              onComplete: function(){
+          options: {
+            animation: {
+              duration: 900,
+              easing: "easeOutCubic",
+              onComplete: () => {
                 ctxPrio.style.opacity = "1";
               }
             },
-            indexAxis:"y",
-            plugins:{ legend:{ display:false } },
-            scales:{
-              x:{ beginAtZero:true, ticks:{ precision:0 } }
-            },
-            responsive:true,
-            maintainAspectRatio:false
+            plugins: { legend: { display: false } },
+            indexAxis: "y",
+            responsive: true,
+            maintainAspectRatio: false,
+
+            // CLICK → FILTRAR POR PRIORIDAD (mine=1 para que sean "mis" tickets)
+            onClick: (evt, els) => {
+              if (!els.length) return;
+
+              const idx   = els[0].index;
+              const label = labelsPrio[idx];
+              const code  = priorityMap[label];
+
+              if (code) {
+                window.location.href = `/listado/?priority=${code}&mine=1`;
+              } else {
+                window.location.href = `/listado/?mine=1`;
+              }
+            }
           }
         });
-        setTimeout(()=>{ ctxPrio.style.opacity = "1"; }, 900);
+
+        setTimeout(() => {
+          ctxPrio.style.opacity = "1";
+        }, 150);
       }
 
     }catch(err){
-      console.error("Error en dashboard:", err);
+      console.error("Dashboard error:", err);
     }
   }
 
+  // ======================================================
+  // INICIALIZACIÓN
+  // ======================================================
   document.addEventListener("DOMContentLoaded", ()=>{
     setHeroDate();
     loadDashboard();
@@ -930,5 +1006,8 @@
 
 })();
 </script>
+
+
+
 
 {% endblock %}

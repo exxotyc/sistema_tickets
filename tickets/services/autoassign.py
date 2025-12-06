@@ -8,6 +8,8 @@ def auto_assign_ticket(ticket: Ticket):
     Autoasigna un ticket según su área.
     Round-robin dentro del área.
     """
+    from tickets.notifications import create_inapp_notification
+
     # Configuración general
     cfg = AutoAssignConfig.objects.first()
     if not cfg or not cfg.enabled:
@@ -53,5 +55,16 @@ def auto_assign_ticket(ticket: Ticket):
 
     ticket.assigned_to = next_user
     ticket.save(update_fields=["assigned_to"])
+
+    # ============================================================
+    # 🔔 NOTIFICACIÓN INTERNA AL TÉCNICO AUTOASIGNADO
+    # ============================================================
+    create_inapp_notification(
+        next_user,
+        ticket,
+        "autoassigned",
+        f"Se te asignó automáticamente el ticket #{ticket.pk}",
+        f"El sistema te asignó este ticket basado en tu área ({area.name})."
+    )
 
     return next_user

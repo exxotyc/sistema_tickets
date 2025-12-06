@@ -5,6 +5,10 @@ import mimetypes
 from django.contrib.auth import get_user_model, password_validation
 from rest_framework import serializers
 
+from .models import Attachment
+from django.core.exceptions import ValidationError
+import magic   # sudo apt install libmagic1
+
 from . import rbac
 from .models import (
     Area,
@@ -18,6 +22,8 @@ from .models import (
 )
 
 UserModel = get_user_model()
+
+import uuid
 
 
 # ==========================================================
@@ -263,9 +269,37 @@ class PrioritySerializer(serializers.ModelSerializer):
         read_only_fields = ["created_at"]
 
 
+
 # ==========================================================
-#   ATTACHMENTS
+#   ATTACHMENT
 # ==========================================================
+# -----------------------------
+# CONFIGURACIÓN DE SEGURIDAD
+# -----------------------------
+SAFE_EXTENSIONS = {
+    ".pdf",
+    ".png",
+    ".jpg", ".jpeg",
+    ".webp",
+    ".txt", ".log",
+    ".csv",
+    ".xlsx",
+    ".docx",
+    ".pptx",
+}
+
+ALLOWED_MIME = {
+    "application/pdf",
+    "image/png", "image/jpeg", "image/webp",
+    "text/plain",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
+
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+
 class TicketAttachmentSerializer(serializers.ModelSerializer):
     user = UserSummarySerializer(read_only=True)
     filename = serializers.CharField(source="file.name", read_only=True)
@@ -292,6 +326,44 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
             "filename",
         ]
 
+    # ---------------------------------------------
+    # FUNCIÓN CENTRAL DE CHEQUEO DE SEGURIDAD
+    # ---------------------------------------------
+    def _run_security_checks(self, f):
+        # 1) Extensión
+        ext = "." + f.name.lower().rsplit(".", 1)[-1]
+        if ext not in SAFE_EXTENSIONS:
+            raise ValidationError(f"Extensión no permitida: {ext}")
+
+        # 2) Tamaño máximo
+        if getattr(f, "size", 0) > MAX_FILE_SIZE:
+            raise ValidationError("El archivo supera el límite de 10 MB.")
+
+        # 3) MIME real (no el que dice el navegador)
+        #    Leemos un pequeño trozo y luego devolvemos el puntero
+        pos = f.tell() if hasattr(f, "tell") else None
+        head = f.read(2048)
+        mime_real = magic.from_buffer(head, mime=True)
+        if pos is not None and hasattr(f, "seek"):
+            f.seek(pos)
+
+        if mime_real not in ALLOWED_MIME:
+            raise ValidationError(f"Tipo MIME no permitido: {mime_real}")
+
+        # 4) Nombre sospechoso (doble extensión tipo foto.jpg.php)
+        if f.name.count(".") > 1:
+            raise ValidationError("El nombre del archivo es sospechoso (doble extensión).")
+
+    # ---------------------------------------------
+    # VALIDACIÓN DE CAMPO (DRF LA LLAMA SI TODO OK)
+    # ---------------------------------------------
+    def validate_file(self, f):
+        self._run_security_checks(f)
+        return f
+
+    # ---------------------------------------------
+    # UTILITARIOS PARA META
+    # ---------------------------------------------
     def _guess_mime(self, uploaded_file):
         if hasattr(uploaded_file, "content_type") and uploaded_file.content_type:
             return uploaded_file.content_type
@@ -300,52 +372,70 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
 
     def _compute_sha256(self, uploaded_file):
         hasher = hashlib.sha256()
-        position = getattr(uploaded_file, "tell", lambda: None)()
+        pos = uploaded_file.tell() if hasattr(uploaded_file, "tell") else None
         for chunk in uploaded_file.chunks():
             hasher.update(chunk)
-        if hasattr(uploaded_file, "seek") and position is not None:
-            uploaded_file.seek(position)
+        if pos is not None and hasattr(uploaded_file, "seek"):
+            uploaded_file.seek(pos)
         return hasher.hexdigest()
 
+    # ---------------------------------------------
+    # CREATE — SIEMPRE VUELVE A CHEQUEAR
+    # ---------------------------------------------
     def create(self, validated_data):
         uploaded_file = validated_data.get("file")
+
         if uploaded_file:
+            # ⚠️ Chequeos de seguridad SIEMPRE aquí
+            self._run_security_checks(uploaded_file)
+
+            # Tamaño, MIME, hash
             validated_data["size_bytes"] = getattr(uploaded_file, "size", None)
             validated_data["mime"] = self._guess_mime(uploaded_file)
             validated_data["sha256"] = self._compute_sha256(uploaded_file)
 
-        request = self.context.get("request")
-        user = getattr(request, "user", None)
+            # Nombre seguro
+            ext = uploaded_file.name.lower().rsplit(".", 1)[-1]
+            safe_name = f"{uuid.uuid4().hex}.{ext}"
+            uploaded_file.name = safe_name
 
-        if user and user.is_authenticated:
-            validated_data.setdefault("user", user)
+        # Asignar usuario
+        request = self.context.get("request")
+        if request and request.user.is_authenticated:
+            validated_data["user"] = request.user
 
         return Attachment.objects.create(**validated_data)
-
 
 # ==========================================================
 #   COMMENTS
 # ==========================================================
 class CommentSerializer(serializers.ModelSerializer):
     user_username = serializers.CharField(source="user.username", read_only=True)
-    content = serializers.CharField(write_only=True)
+
+    # Aceptamos ambas variantes
+    content = serializers.CharField(write_only=True, required=False)
+    body = serializers.CharField(write_only=True, required=False)
 
     class Meta:
         model = Comment
-        fields = ["id", "ticket", "user", "user_username", "created_at", "content"]
+        fields = ["id", "ticket", "user", "user_username", "created_at", "content", "body"]
         read_only_fields = ["id", "user", "user_username", "created_at"]
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        data["content"] = instance.body
+        data["content"] = instance.body  # respuesta estándar
+        data.pop("body", None)
         return data
 
     def create(self, validated_data):
-        body = validated_data.pop("content", "")
+        # Soporte para content o body
+        body = validated_data.pop("content", "") or validated_data.pop("body", "")
+
         comment = Comment(**validated_data)
         comment.body = body
         comment.save()
         return comment
+
 
 
 # ==========================================================

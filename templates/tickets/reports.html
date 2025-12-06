@@ -3,22 +3,58 @@
 
 {% block extra_head %}
 <style>
-  .glass {
+/* ===========================================
+      CONTENEDOR GLASS GENERAL
+=========================================== */
+.glass {
     background: rgba(255,255,255,.92);
     backdrop-filter: blur(6px);
     border: 1px solid rgba(15,23,42,.06);
     border-radius: 1rem;
     box-shadow: 0 6px 20px rgba(0,0,0,.05);
     padding: 1.25rem 1.5rem;
-  }
-  .chart-card {
-    padding: 1rem;
-    border-radius: .75rem;
-    border: 1px solid rgba(15,23,42,.06);
-  }
+}
+
+/* ===========================================
+      SCROLL UNIVERSAL PARA REPORTES
+=========================================== */
+.report-scroll {
+    max-height: 360px;         /* altura profesional para dashboards */
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 6px;
+}
+
+/* Scroll Chrome */
+.report-scroll::-webkit-scrollbar {
+    width: 7px;
+}
+.report-scroll::-webkit-scrollbar-thumb {
+    background: rgba(0,0,0,0.25);
+    border-radius: 8px;
+}
+.report-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgba(0,0,0,0.35);
+}
+
+/* Scroll Firefox */
+.report-scroll {
+    scrollbar-color: rgba(0,0,0,0.35) transparent;
+    scrollbar-width: thin;
+}
+
+/* ===========================================
+      OPCIONAL: Tabla compacta
+=========================================== */
+.table-hover tbody tr:hover {
+    background: rgba(15,23,42,.04);
+}
+
 </style>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+
 {% endblock %}
 
 {% block content %}
@@ -101,9 +137,11 @@
   </div>
 </div>
 
-<!-- TABLA PRINCIPAL -->
+<!-- TABLA PRINCIPAL CON SCROLL -->
 <div class="glass mt-3">
-  <div class="table-responsive">
+
+  <div class="report-scroll table-responsive">
+
     <table class="table table-hover align-middle mb-0">
       <thead class="table-light">
         <tr>
@@ -118,19 +156,23 @@
         <tr><td colspan="5" class="text-center text-muted py-4">Sin datos</td></tr>
       </tbody>
     </table>
-  </div>
-</div>
 
-<!-- MÉTRICAS DE FAQ -->
-<div class="card mt-4">
-  <div class="card-body">
-    <h5 class="mb-3">
-      <i class="bi bi-question-diamond text-primary"></i>
-      Métricas de FAQ
-    </h5>
+  </div><!-- report-scroll -->
 
-    <table class="table table-hover">
-      <thead>
+</div><!-- glass -->
+
+<!-- MÉTRICAS DE FAQ CON SCROLL -->
+<div class="glass mt-4">
+
+  <h5 class="mb-3">
+    <i class="bi bi-question-diamond text-primary"></i>
+    Métricas de FAQ
+  </h5>
+
+  <div class="report-scroll">
+
+    <table class="table table-hover mb-0">
+      <thead class="table-light">
         <tr>
           <th>Pregunta</th>
           <th>Categoría</th>
@@ -144,8 +186,11 @@
         <tr><td colspan="6" class="text-center text-muted">Cargando métricas…</td></tr>
       </tbody>
     </table>
-  </div>
-</div>
+
+  </div><!-- report-scroll -->
+
+</div><!-- glass -->
+
 
 {% endblock %}
 
@@ -163,6 +208,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const chartMonthCtx = document.getElementById("chartMonth");
   let chartState = null, chartMonth = null;
 
+  /* ============================================================
+        UTILIDAD PARA OBTENER PARÁMETROS DEL FORM
+  ============================================================ */
   function qsParams(){
     const fd = new FormData(form);
     const p = new URLSearchParams();
@@ -172,15 +220,37 @@ document.addEventListener("DOMContentLoaded", () => {
     return p.toString();
   }
 
-  // =============================================
-  //     CARGAR DATOS DE TICKETS
-  // =============================================
+  /* ============================================================
+        REDIRECCIONAR AL HACER CLICK EN FILAS DE TICKETS
+  ============================================================ */
+  document.addEventListener("click", function(e){
+    const row = e.target.closest("tr[data-ticket]");
+    if (!row) return;
+    const ticketId = row.dataset.ticket;
+    window.location.assign(`/tickets/${ticketId}/`);
+  });
+
+  /* ============================================================
+        CLICK EN FILAS DE MÉTRICA FAQ → IR AL FAQ
+  ============================================================ */
+  document.addEventListener("click", function (e) {
+      const faqRow = e.target.closest("tr[data-faq]");
+      if (!faqRow) return;
+
+      const faqId = faqRow.dataset.faq;
+      window.location.assign(`/faq/${faqId}/`);
+  });
+
+  /* ============================================================
+        CARGAR TABLA, GRÁFICOS, CONTADORES
+  ============================================================ */
   async function loadData(){
     rows.innerHTML =
       '<tr><td colspan="5" class="text-center text-muted py-4">Cargando…</td></tr>';
 
     const url = "{% url 'reports_data' %}?" + qsParams();
     const r = await fetch(url);
+
     if(!r.ok){
       rows.innerHTML =
         '<tr><td colspan="5" class="text-center text-danger py-4">Error cargando datos</td></tr>';
@@ -189,13 +259,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const j = await r.json();
 
-    // tabla
+    /* -------- TABLA PRINCIPAL DE TICKETS -------- */
     if(!j.rows || !j.rows.length){
       rows.innerHTML =
         '<tr><td colspan="5" class="text-center text-muted py-4">Sin resultados</td></tr>';
     } else {
       rows.innerHTML = j.rows.map(t => `
-        <tr>
+        <tr data-ticket="${t.id}">
           <td>${t.id}</td>
           <td>${t.title || '—'}</td>
           <td>${t.state || '—'}</td>
@@ -207,7 +277,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     totalCount.textContent = j.total ?? 0;
 
-    // gráfico de estados
+    /* ============================================
+          GRÁFICO DE ESTADOS (DOUGHNUT)
+    ============================================ */
     const labelsState = ["open","in_progress","resolved","closed"];
     const pretty = {
       open: "Abiertos",
@@ -241,7 +313,36 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
 
-    // gráfico por mes
+    /* -------- CLICK EN PORCIÓN DEL GRÁFICO -------- */
+    chartStateCtx.onclick = function(evt){
+      const points = chartState.getElementsAtEventForMode(
+        evt,
+        "nearest",
+        { intersect: true },
+        false
+      );
+
+      if (!points.length) return;
+
+      const index = points[0].index;
+      const label = chartState.data.labels[index];
+
+      const stateMap = {
+        "Abiertos": "open",
+        "En progreso": "in_progress",
+        "Resueltos": "resolved",
+        "Cerrados": "closed"
+      };
+
+      const code = stateMap[label];
+      if (!code) return;
+
+      window.location.assign(`/tickets/estado/${code}/`);
+    };
+
+    /* ============================================
+          GRÁFICO DE TICKETS POR MES
+    ============================================ */
     const byMonth = j.by_month || {};
     const labelsMonth = Object.keys(byMonth);
     const dataMonth = labelsMonth.map(k => byMonth[k] || 0);
@@ -271,9 +372,9 @@ document.addEventListener("DOMContentLoaded", () => {
     btnExportCsv.href = "{% url 'reports_export_csv' %}?" + qsParams();
   }
 
-  // =============================================
-  //     CARGAR MÉTRICAS FAQ
-  // =============================================
+  /* ============================================================
+        CARGAR MÉTRICAS DE FAQ (TABLA DE ABAJO)
+  ============================================================ */
   async function loadFAQMetrics(){
     faqRows.innerHTML =
       '<tr><td colspan="6" class="text-center text-muted">Cargando métricas…</td></tr>';
@@ -297,15 +398,15 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       faqRows.innerHTML = data.map(item => `
-        <tr>
-          <td>${item.question}</td>
-          <td>${item.category__name}</td>
-          <td><span class="badge text-bg-success">${item.utiles}</span></td>
-          <td><span class="badge text-bg-danger">${item.no_utiles}</span></td>
-          <td>${item.total}</td>
-          <td><strong>${item.utilidad_pct}%</strong></td>
-        </tr>
-      `).join("");
+    <tr data-faq="${item.id}">
+        <td>${item.question}</td>
+        <td>${item.category__name}</td>
+        <td><span class="badge text-bg-success">${item.utiles}</span></td>
+        <td><span class="badge text-bg-danger">${item.no_utiles}</span></td>
+        <td>${item.total}</td>
+        <td><strong>${item.utilidad_pct}%</strong></td>
+    </tr>
+  `).join("");
 
     }catch(err){
       console.error("FAQ METRICS ERROR:", err);
@@ -314,14 +415,21 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  /* ============================================================
+        FILTROS
+  ============================================================ */
   form.addEventListener("submit", e => {
     e.preventDefault();
     loadData();
   });
 
-  // Inicial
+  /* ============================================================
+        INICIALIZACIÓN
+  ============================================================ */
   loadData();
   loadFAQMetrics();
+
 });
+
 </script>
 {% endblock %}

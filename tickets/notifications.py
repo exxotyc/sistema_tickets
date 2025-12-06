@@ -45,6 +45,20 @@ def _dispatch(event: str, ticket, context: dict) -> None:
     _send_email(event, ticket, context)
     _send_webhook(event, ticket, context)
 
+# ------------------------
+#   IN-APP NOTIFICATIONS
+# ------------------------
+def create_inapp_notification(user, ticket, type, title, message):
+    from tickets.models import Notification
+    Notification.objects.create(
+        user=user,
+        ticket=ticket,
+        type=type,
+        title=title,
+        message=message,
+    )
+
+
 
 def _send_email(event: str, ticket, context: dict) -> None:
     cfg = _get_config()
@@ -92,6 +106,14 @@ def _notify(event: str, ticket, context: dict, *, key_suffix: Optional[str] = No
 
 
 def notify_ticket_created(ticket) -> bool:
+    # notificación interna
+    create_inapp_notification(
+        ticket.requester,
+        ticket,
+        "created",
+        f"Ticket #{ticket.pk} creado",
+        f"Se ha creado el ticket #{ticket.pk}: {ticket.title}"
+    )
     return _notify(
         "ticket_created",
         ticket,
@@ -103,17 +125,33 @@ def notify_ticket_created(ticket) -> bool:
     )
 
 
+
 def notify_ticket_state_change(ticket, previous: str, new: str, user=None) -> bool:
     username = getattr(user, "username", None)
+
+    # Notificación interna
+    create_inapp_notification(
+        ticket.requester,
+        ticket,
+        "state_changed",
+        f"Ticket #{ticket.pk} cambió a {new}",
+        f"Estado: {previous} → {new}"
+    )
+    if ticket.assigned_to:
+        create_inapp_notification(
+            ticket.assigned_to,
+            ticket,
+            "state_changed",
+            f"Ticket #{ticket.pk} cambió a {new}",
+            f"Estado: {previous} → {new}"
+        )
+
     return _notify(
         "ticket_state_changed",
         ticket,
         {
             "subject": f"Ticket #{ticket.pk} cambió a {new}",
-            "message": (
-                f"El ticket #{ticket.pk} cambió de estado {previous} → {new}."
-                + (f" Usuario: {username}." if username else "")
-            ),
+            "message": f"El ticket #{ticket.pk} cambió de {previous} → {new}.",
             "from": previous,
             "to": new,
             "username": username,
@@ -123,9 +161,22 @@ def notify_ticket_state_change(ticket, previous: str, new: str, user=None) -> bo
 
 
 def notify_sla_risk(ticket, due_at) -> bool:
-    suffix = None
-    if due_at:
-        suffix = due_at.isoformat()
+    from tickets.notifications import create_inapp_notification
+
+    # 🔔 Notificación interna para el técnico asignado
+    if ticket.assigned_to:
+        create_inapp_notification(
+            ticket.assigned_to,
+            ticket,
+            "sla_risk",
+            f"SLA en riesgo · Ticket #{ticket.pk}",
+            f"El ticket vence pronto ({due_at})."
+        )
+
+    # Para evitar duplicados en deduplicación
+    suffix = due_at.isoformat() if due_at else None
+
+    # 📧 Notificación por correo / webhook
     return _notify(
         "ticket_sla_risk",
         ticket,

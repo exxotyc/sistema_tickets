@@ -70,6 +70,8 @@ web_urlpatterns = [
     path("listado/", views.ticket_list, name="ticket_list"),
     path("tickets/new/", views.ticket_new, name="ticket_new"),
     path("tickets/<int:pk>/", views.ticket_detail, name="ticket_detail"),
+    # Edición de tickets
+    path("tickets/<int:pk>/edit/", views.ticket_edit, name="ticket_edit"),  # ← NUEVA
     path("tickets/", views.tickets_alias, name="ticket_list_legacy"),
     path("tickets/todos/", views.ticket_list_all, name="ticket_list_all"),
     path("tickets/mios/", views.ticket_list_assigned, name="ticket_list_assigned"),
@@ -146,8 +148,23 @@ web_urlpatterns = [
     path("mantenedor/autoasignacion/save/", views_autoassign.autoassign_save, name="autoassign_save"),
     path("mantenedor/autoasignacion/reset_rr/", views_autoassign.reset_rr, name="reset_rr"),
 
+    #Notificaciones
+    path("api/notifications/", views.notifications_list, name="notifications_list"),
+    path("api/notifications/read/<int:pk>/", views.notification_mark_read, name="notification_mark_read"),
+
+    # Vistas de tickets por estado
+    path("tickets/estado/<str:state>/", views.ticket_list_state, name="ticket_list_state"),
+    path("faq/<int:pk>/", views.faq_detail, name="faq_detail"),
+
+
+ 
+
+
+
+
     # ESTE SIEMPRE AL FINAL (genérico)
     path("mantenedor/<slug:code>/", views.maint_section, name="maint_section"),
+    
 
     
 ]
@@ -158,5 +175,4 @@ web_urlpatterns = [
 urlpatterns = web_urlpatterns + [
     path("api/", include((api_urlpatterns, "api"), namespace="api")),
 ]
-
 

@@ -392,3 +392,31 @@ class AreaRoundRobin(models.Model):
 
     def __str__(self):
         return f"RR {self.area.name} → {self.last_user.username if self.last_user else 'Ninguno'}"
+    
+
+
+
+# ==========================
+#   NOTIFICATIONS (IN-APP)
+# ==========================
+class Notification(models.Model):
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="notifications"
+    )
+    ticket = models.ForeignKey(
+        Ticket, null=True, blank=True, on_delete=models.CASCADE
+    )
+
+    type = models.CharField(max_length=50)  # created, state_changed, assigned, comment, sla_risk
+    title = models.CharField(max_length=200)
+    message = models.TextField()
+
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"[{self.type}] {self.title}"
+

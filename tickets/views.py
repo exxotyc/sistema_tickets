@@ -36,6 +36,7 @@ from rest_framework import serializers as drf_serializers
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import AllowAny
+from .models import Ticket
 
 
 from rest_framework.decorators import (
@@ -143,10 +144,21 @@ def _navbar_sections(user):
     qs = qs.distinct().order_by("title")
     return [{"code": s.code, "name": s.title, "title": s.title} for s in qs]
 
-def _render(request, template_name, ctx=None):
-    ctx = ctx or {}
-    ctx.setdefault("maint_sections", _navbar_sections(request.user))
-    return render(request, template_name, ctx)
+def _render(request, template, ctx={}):
+    user = request.user
+
+    roles = set()
+    if user.is_authenticated:
+        roles = set(user.groups.values_list("name", flat=True))
+
+    ctx.update({
+        "is_admin": ("admin" in roles),
+        "is_tecnico": ("tecnico" in roles),
+        "maint_sections": Section.objects.filter(is_active=True).order_by("title") if ("admin" in roles) else []
+    })
+
+    return render(request, template, ctx)
+
 
 # ==================== JWT ====================
 
@@ -237,7 +249,7 @@ class TicketViewSet(viewsets.ModelViewSet):
     ViewSet para gestionar Tickets:
     - admin: ve y edita todos
     - técnico: ve sus propios asignados
-    - usuario: solo sus propios tickets
+    - usuario: solo sus propios tickets (y SOLO puede editar título/descripcion)
     """
     serializer_class = TicketSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -255,21 +267,21 @@ class TicketViewSet(viewsets.ModelViewSet):
         user = self.request.user
 
         qs = Ticket.objects.select_related(
-        "requester",
-        "assigned_to",
-        "category",
-        "priority"
+            "requester",
+            "assigned_to",
+            "category",
+            "priority"
         ).order_by("-created_at")
 
-    # Admin ve todo
+        # Admin ve todo
         if user.groups.filter(name="admin").exists():
             return qs
 
-    # Técnico ve todo (pero las acciones se controlan en el frontend y en perform_update)
+        # Técnico ve todo
         if user.groups.filter(name="tecnico").exists():
             return qs
 
-    # Usuario normal: solo sus tickets
+        # Usuario → solo sus tickets
         return qs.filter(requester=user)
 
     # ------------------------------------------------------
@@ -278,46 +290,125 @@ class TicketViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         user = self.request.user
 
-    # Herdar área del usuario
+        # Heredar área del usuario
         area = None
         if hasattr(user, "profile") and user.profile.area:
-                area = user.profile.area
+            area = user.profile.area
 
         return serializer.save(
             requester=user,
             area=area,
         )
 
-
     # ------------------------------------------------------
-    # ACTUALIZAR TICKET (corregido prioridad FK)
+    # UPDATE / PARTIAL UPDATE
+    # Usuarios solo pueden modificar título y descripción
     # ------------------------------------------------------
-    def perform_update(self, serializer):
-        instance = self.get_object()
-        user = self.request.user
+    def partial_update(self, request, *args, **kwargs):
+        ticket = self.get_object()
+        user = request.user
 
         is_admin = user.groups.filter(name="admin").exists()
         is_tech = user.groups.filter(name="tecnico").exists()
 
-        # Solicitantes NO editan
-        if not (is_admin or is_tech):
-            raise PermissionDenied("No tienes permiso para editar este ticket.")
+        # ==========================================
+        # 1) SOLICITANTE → SOLO title/description
+        # ==========================================
+        if user == ticket.requester and not (is_admin or is_tech):
+            allowed_fields = {"title", "description"}
 
-        # Técnicos solo editan si están asignados
-        if is_tech and instance.assigned_to != user:
-            raise PermissionDenied("No puedes modificar tickets que no te fueron asignados.")
+            for field, value in request.data.items():
+        # Ignorar campos vacíos o nulos del PATCH
+                if value in [None, "", [], {}, "null"]:
+                    continue
+        
+        # Bloquear solo si realmente intentó modificar otro campo
+            if field not in allowed_fields:
+                return Response(
+                    {"detail": f"No autorizado para modificar '{field}'."},
+                    status=403
+            )
 
-        validated = serializer.validated_data
+            return super().partial_update(request, *args, **kwargs)
+        # ==========================================
+        # 2) ADMIN → puede editar TODO
+        # ==========================================
+        if is_admin:
+            return super().partial_update(request, *args, **kwargs)
 
-        # PRIORIDAD — siempre FK correcta
-        if "priority" in validated:
-            instance.priority = validated["priority"]
+        # ==========================================
+        # 3) TÉCNICO → debe estar asignado al ticket
+        # ==========================================
+        if is_tech:
+            if ticket.assigned_to != user:
+                return Response(
+                    {"detail": "No puedes modificar tickets que no te fueron asignados."},
+                    status=403
+                )
+            return super().partial_update(request, *args, **kwargs)
 
-        # CATEGORY — también FK
-        if "category" in validated:
-            instance.category = validated["category"]
+        # ==========================================
+        # Otros casos → denegar
+        # ==========================================
+        return Response({"detail": "No autorizado."}, status=403)
 
-        serializer.save()
+    # ------------------------------------------------------
+    # ACTUALIZAR TICKET (para admin/técnico)
+    # ------------------------------------------------------
+def perform_update(self, serializer):
+    instance = self.get_object()
+    user = self.request.user
+
+    is_admin = user.groups.filter(name="admin").exists()
+    is_tech = user.groups.filter(name="tecnico").exists()
+    is_owner = instance.requester == user
+
+    data = self.request.data
+
+    # ==================================================
+    # 1) USUARIO SOLICITANTE → solo title / description
+    # ==================================================
+    if is_owner and not (is_admin or is_tech):
+
+        allowed = {"title", "description"}
+
+        # Detectar intento de editar campos prohibidos
+        for field, value in data.items():
+            if value in ["", None, "null", [], {}]:
+                continue
+            if field not in allowed:
+                raise PermissionDenied(
+                    f"No puedes modificar el campo '{field}'."
+                )
+
+        # Guardar solo title/description
+        instance.title = data.get("title", instance.title)
+        instance.description = data.get("description", instance.description)
+        instance.save()
+        return instance
+
+    # ==================================================
+    # 2) TÉCNICO → solo si está asignado
+    # ==================================================
+    if is_tech and instance.assigned_to != user:
+        raise PermissionDenied("No puedes modificar tickets que no te fueron asignados.")
+
+    # ==================================================
+    # 3) PRIORIDAD y CATEGORÍA (FK)
+    # ==================================================
+    validated = serializer.validated_data
+
+    if "priority" in validated:
+        instance.priority = validated["priority"]
+
+    if "category" in validated:
+        instance.category = validated["category"]
+
+    # ==================================================
+    # 4) Guardar actualización completa (admin / técnico)
+    # ==================================================
+    serializer.save()
+
 
     # ------------------------------------------------------
     # ASIGNAR TICKET
@@ -332,6 +423,8 @@ class TicketViewSet(viewsets.ModelViewSet):
             ✘ NO puede reasignar un ticket asignado a él
             ✘ NO puede reasignar un ticket asignado a otros
         """
+        from tickets.notifications import create_inapp_notification, notify_ticket_assigned
+
         user = request.user
         ticket = self.get_object()
 
@@ -367,6 +460,18 @@ class TicketViewSet(viewsets.ModelViewSet):
                 }
             )
 
+            # 🔔 Notificación interna para el técnico asignado
+            create_inapp_notification(
+                target,
+                ticket,
+                "assigned",
+                f"Se te ha asignado el ticket #{ticket.pk}",
+                f"{user.username} te asignó el ticket."
+            )
+
+            # (Opcional) Enviar correo
+            notify_ticket_assigned(ticket, target, user)
+
             return Response({
                 "status": "assigned",
                 "assigned_to": target.username,
@@ -396,6 +501,15 @@ class TicketViewSet(viewsets.ModelViewSet):
                     meta_json={"to": user.id, "username": user.username}
                 )
 
+                # 🔔 Notificación interna para el técnico que tomó el ticket
+                create_inapp_notification(
+                    user,
+                    ticket,
+                    "assigned",
+                    f"Tomaste el ticket #{ticket.pk}",
+                    f"Ahora eres responsable del ticket."
+                )
+
                 return Response({
                     "status": "assigned",
                     "assigned_to": user.username
@@ -420,6 +534,7 @@ class TicketViewSet(viewsets.ModelViewSet):
         return Response({"detail": "No autorizado"}, status=403)
 
 
+
 class CommentViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
     queryset = Comment.objects.select_related("ticket", "user").order_by("created_at")
     serializer_class = CommentSerializer
@@ -431,32 +546,82 @@ class CommentViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets.Ge
     def get_queryset(self):
         qs = super().get_queryset()
         u = self.request.user
+
+        # Admin y técnico → pueden ver todos los comentarios
         if _is_admin_or_tech(u):
             return qs
-        return qs.filter(Q(ticket__requester=u) | Q(ticket__assigned_to=u)).distinct()
+
+        # Solicitante → solo de sus tickets (requester) o asignados a él
+        return qs.filter(
+            Q(ticket__requester=u) |
+            Q(ticket__assigned_to=u)
+        ).distinct()
 
     def perform_create(self, serializer):
         t = get_object_or_404(Ticket, pk=self.request.data.get("ticket"))
         u = self.request.user
-        if not (_is_admin_or_tech(u) or t.requester_id == u.id or t.assigned_to_id == u.id):
-            from rest_framework.exceptions import PermissionDenied
-            raise PermissionDenied("No autorizado para comentar este ticket")
+
+        # Nueva regla:
+        # Admin y todos los técnicos → SIEMPRE pueden comentar
+        if not _is_admin_or_tech(u):
+            # Usuarios normales solo si son requester
+            if t.requester_id != u.id:
+                from rest_framework.exceptions import PermissionDenied
+                raise PermissionDenied("No autorizado para comentar este ticket")
+
         serializer.save(user=u, ticket=t)
 
 
-class AttachmentViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
-    queryset = Attachment.objects.select_related("ticket", "user").all().order_by("-created_at")
+
+class AttachmentViewSet(mixins.CreateModelMixin,
+                        mixins.ListModelMixin,
+                        viewsets.GenericViewSet):
+
+    queryset = Attachment.objects.select_related("ticket", "user").order_by("-created_at")
     serializer_class = TicketAttachmentSerializer
-    permission_classes = [IsTicketActorOrAdmin]
-    parser_classes = [MultiPartParser, FormParser, JSONParser]
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ["ticket"]
-    ordering_fields = ["created_at"]
+    permission_classes = [permissions.IsAuthenticated]
+
+    # 🔥 EL PARSER QUE PERMITE SUBIR ARCHIVOS
+    parser_classes = [MultiPartParser, FormParser]
 
     def get_queryset(self):
         qs = super().get_queryset()
+        ticket_id = self.request.query_params.get("ticket")
+
+        # 🔥 Si viene el parámetro ?ticket=XX → filtrar por ese ticket
+        if ticket_id:
+            return qs.filter(ticket_id=ticket_id)
+
+        # 🔒 Seguridad: usuarios no deben ver adjuntos de otros tickets
         u = self.request.user
-        return qs if _is_admin_or_tech(u) else qs.filter(Q(ticket__requester=u) | Q(ticket__assigned_to=u)).distinct()
+        if u.is_authenticated:
+
+            # Admin / técnico ven todo
+            if u.is_staff or hasattr(u, "is_admin_or_tech") and u.is_admin_or_tech:
+                return qs
+
+            # Usuario normal → sólo sus tickets
+            return qs.filter(ticket__requester=u)
+
+        return qs.none()
+
+
+    def perform_create(self, serializer):
+        request = self.request
+
+        # ticket recibido vía POST multipart
+        ticket_id = request.data.get("ticket")
+        ticket = get_object_or_404(Ticket, id=ticket_id)
+
+        user = request.user
+        if not (
+            _is_admin_or_tech(user)
+            or ticket.requester_id == user.id
+            or ticket.assigned_to_id == user.id
+        ):
+            raise PermissionDenied("No autorizado para subir archivos.")
+
+        serializer.save(user=user, ticket=ticket)
 
 
 class TicketLogViewSet(viewsets.ReadOnlyModelViewSet):
@@ -622,10 +787,10 @@ def ticket_new(request):
     from_faq = request.GET.get("fromfaq", "").strip()
 
     # ====================================================
-    # 0) PERMISOS: permitir crear tickets a:
+    # 0) PERMISOS: permitir crear a:
     #    - admin
     #    - tecnico
-    #    - usuario (cualquiera autenticado)
+    #    - usuario común
     # ====================================================
     roles = set(request.user.groups.values_list("name", flat=True))
     if not roles & {"admin", "tecnico", "usuario"}:
@@ -633,14 +798,16 @@ def ticket_new(request):
         return redirect("ticket_list")
 
     # ====================================================
-    # 2) Procesar POST (crear ticket)
+    # 2) Procesar FORM (POST)
     # ====================================================
     if request.method == "POST":
+
         title = request.POST.get("title", "").strip()
         description = request.POST.get("description", "").strip()
         category_id = request.POST.get("category")
-        priority = request.POST.get("priority", "medium")
+        priority_code = request.POST.get("priority", "medium").strip()
 
+        # Validación básica
         if not title or not description:
             messages.error(request, "Título y descripción son obligatorios.")
             categories = Category.objects.order_by("name")
@@ -649,23 +816,26 @@ def ticket_new(request):
                 "tickets/ticket_new.html",
                 {
                     "categories": categories,
-                    "is_admin_or_tecnico": request.user.groups.filter(
-                        name__in=["admin", "tecnico"]
-                    ).exists(),
+                    "is_admin_or_tecnico": ("admin" in roles or "tecnico" in roles),
                     "from_faq": from_faq,
                 },
             )
 
-        # 🔒 Forzar prioridad fija para solicitantes simples
-        # Admin y técnico pueden elegir prioridad
+        # ====================================================
+        # 2.1 Forzar prioridad para usuarios normales
+        # ----------------------------------------------------
+        # Admin y técnico pueden elegir la prioridad,
+        # usuario siempre queda en "medium".
+        # ====================================================
         if "admin" not in roles and "tecnico" not in roles:
-            priority = "medium"
+            priority_code = "medium"
 
+        # Crear ticket
         Ticket.objects.create(
             title=title,
             description=description,
             category_id=category_id or None,
-            priority=priority,
+            priority=priority_code,
             requester=request.user,
             state="open",
         )
@@ -674,7 +844,7 @@ def ticket_new(request):
         return redirect("ticket_list")
 
     # ====================================================
-    # 3) GET — Renderizar formulario
+    # 3) GET → Render formulario vacío
     # ====================================================
     categories = Category.objects.order_by("name")
 
@@ -683,12 +853,11 @@ def ticket_new(request):
         "tickets/ticket_new.html",
         {
             "categories": categories,
-            "is_admin_or_tecnico": request.user.groups.filter(
-                name__in=["admin", "tecnico"]
-            ).exists(),
+            "is_admin_or_tecnico": ("admin" in roles or "tecnico" in roles),
             "from_faq": from_faq,
         },
     )
+
 
 
 
@@ -761,42 +930,54 @@ def ticket_list(request):
         .order_by("-created_at")
     )
 
-    # --- RBAC
-    if "admin" in roles:
-        pass  # Admin ve todo
-    elif "tecnico" in roles:
-        qs = qs.filter(assigned_to=user)
+    # =====================================================================
+    #          MANEJO CORRECTO DE ?mine=1 (MIS TICKETS PARA TODOS)
+    # =====================================================================
+    mine = request.GET.get("mine") == "1"
+
+    if mine:
+        # MIS TICKETS SEGÚN ROL
+        if "tecnico" in roles:
+            qs = qs.filter(assigned_to=user)
+        else:
+            qs = qs.filter(requester=user)
     else:
-        qs = qs.filter(requester=user)
+        # COMPORTAMIENTO NORMAL SIN ?mine=1
+        if "tecnico" in roles:
+            qs = qs.filter(assigned_to=user)
+        elif "admin" in roles:
+            pass  # Admin ve todo
+        else:
+            qs = qs.filter(requester=user)
 
-    # ================================
-    #   Filtros GET avanzados
-    # ================================
-    state = request.GET.get("state") or ""
-    category = request.GET.get("category") or ""
-    priority = request.GET.get("priority") or ""
-    assignee = request.GET.get("assignee") or ""
+    # =====================================================================
+    #                      FILTROS GET AVANZADOS
+    # =====================================================================
+    state     = request.GET.get("state") or ""
+    category  = request.GET.get("category") or ""
+    priority  = (request.GET.get("priority") or "").strip().lower()
+    assignee  = request.GET.get("assignee") or ""
     from_date = request.GET.get("from") or ""
-    to_date = request.GET.get("to") or ""
-    q = request.GET.get("q") or ""
+    to_date   = request.GET.get("to") or ""
+    q         = request.GET.get("q") or ""
 
-    # --- FILTRO ESTADO
+    # Estado
     if state:
         qs = qs.filter(state=state)
 
-    # --- FILTRO CATEGORÍA
+    # Categoría
     if category.isdigit():
         qs = qs.filter(category_id=int(category))
 
-    # --- FILTRO PRIORIDAD
+    # Prioridad
     if priority:
-        qs = qs.filter(priority__code=priority)
+        qs = qs.filter(priority__code__iexact=priority)
 
-    # --- FILTRO ASIGNADO
+    # Asignado
     if assignee.isdigit():
         qs = qs.filter(assigned_to_id=int(assignee))
 
-    # --- FILTRO DE FECHAS
+    # Fechas
     try:
         if from_date:
             from_dt = make_aware(datetime.strptime(from_date, "%Y-%m-%d"))
@@ -808,7 +989,7 @@ def ticket_list(request):
     except Exception:
         pass
 
-    # --- FILTRO TEXTO (ID / título / descripción)
+    # Búsqueda
     if q.strip():
         raw = q.strip()
         m = re.fullmatch(r"#?\s*(\d+)", raw)
@@ -825,20 +1006,15 @@ def ticket_list(request):
                 Q(description__icontains=raw)
             )
 
-    # ================================
-    #   Evaluación final
-    # ================================
     tickets = list(qs)
 
-    is_tecnico = "tecnico" in roles
-
-    # ================================
-    #   Para filtros del template
-    # ================================
     categories = Category.objects.all().order_by("name")
     priorities = Priority.objects.all().order_by("sla_minutes")
-    assignees = User.objects.filter(groups__name="tecnico").order_by("username")
 
+    # CORRECCIÓN IMPORTANTE: admins también pueden aparecer como "asignables"
+    assignees = User.objects.filter(
+        Q(groups__name="tecnico") | Q(groups__name="admin")
+    ).order_by("username")
 
     return render(
         request,
@@ -847,7 +1023,7 @@ def ticket_list(request):
             "tickets": tickets,
             "tickets_count": len(tickets),
 
-            # Filtros actuales
+            # Filtros activos
             "state": state,
             "priority": priority,
             "category": category,
@@ -856,19 +1032,24 @@ def ticket_list(request):
             "to": to_date,
             "q": q,
 
-            # Datos para selects
+            # Selects
             "categories": categories,
             "priorities": priorities,
             "assignees": assignees,
 
-            "is_tecnico": is_tecnico,
+            # CORRECCIÓN FINAL: enviar "mine"
+            "mine": mine,
         },
     )
+
+
+
 
 @login_required
 def ticket_list_all(request):
     user = request.user
 
+    # Solo admin y técnico pueden ver todos los tickets
     if not user.groups.filter(name="tecnico").exists() and not user.groups.filter(name="admin").exists():
         messages.error(request, "No tienes permiso para ver todos los tickets.")
         return redirect("ticket_list")
@@ -877,35 +1058,66 @@ def ticket_list_all(request):
         "requester", "assigned_to", "category", "priority"
     ).order_by("-created_at")
 
-    # Filtros generales
-    state = request.GET.get("state", "")
-    priority = request.GET.get("priority", "")
-    category = request.GET.get("category", "")
-    q = request.GET.get("q", "")
+    # =============================
+    #      FILTROS GET
+    # =============================
+    state     = request.GET.get("state", "").strip()
+    priority  = request.GET.get("priority", "").strip()   # priority.code
+    category  = request.GET.get("category", "").strip()
+    assignee  = request.GET.get("assignee", "").strip()
+    q         = request.GET.get("q", "").strip()
 
+    # Estado
     if state:
         qs = qs.filter(state=state)
 
+    # Prioridad usando priority.code
     if priority:
-        qs = qs.filter(priority=priority)
+        qs = qs.filter(priority__code=priority)
 
-    if category:
-        qs = qs.filter(category_id=category)
+    # Categoría por id
+    if category.isdigit():
+        qs = qs.filter(category_id=int(category))
 
+    # Asignado
+    if assignee.isdigit():
+        qs = qs.filter(assigned_to_id=int(assignee))
+
+    # Búsqueda
     if q:
         qs = qs.filter(Q(title__icontains=q) | Q(description__icontains=q))
 
+    # =============================
+    #     DATOS PARA SELECTS
+    # =============================
     categories = Category.objects.order_by("name")
-    priorities = Priority.objects.order_by("name")
+    priorities = Priority.objects.order_by("sla_minutes")
+    assignees  = User.objects.filter(
+        groups__name__in=["admin", "tecnico"]
+    ).distinct().order_by("username")
 
+    # =============================
+    #     RENDER
+    # =============================
     return render(request, "tickets/tickets_list_table.html", {
         "tickets": qs,
-        "show_assignments": True,  # muestra columna asignado
+        "show_assignments": True,
         "title": "Todos los tickets",
+
+        # selects
         "categories": categories,
         "priorities": priorities,
-        "filters": request.GET,
+        "assignees": assignees,
+
+        # valores actuales del filtro
+        "state": state,
+        "priority": priority,
+        "category": category,
+        "assignee": assignee,
+        "q": q,
     })
+
+
 @login_required
 def ticket_list_assigned(request):
     user = request.user
@@ -947,32 +1159,77 @@ def ticket_list_assigned(request):
 
 
 
+# ============================================================
+#   TICKET DETAIL — VISTA PRINCIPAL DEL TICKET
+# ============================================================
 @login_required
 def ticket_detail(request, pk: int):
+    from .models import Category  # import seguro dentro de la función
+
     t = get_object_or_404(
-        Ticket.objects.select_related("requester", "assigned_to", "category"), pk=pk
+        Ticket.objects.select_related("requester", "assigned_to", "category"),
+        pk=pk
     )
+
     is_admin = _is_adminlike(request.user)
-    return _render(request, "tickets/ticket_detail.html", {
-        "ticket": t, "ticket_id": t.id, "is_admin": is_admin
-    })
+    is_tech  = request.user.groups.filter(name="tecnico").exists()
 
+    categories = Category.objects.all().order_by("name")
+
+    return _render(
+        request,
+        "tickets/ticket_detail.html",
+        {
+            "ticket": t,
+            "ticket_id": t.id,
+            "is_admin": is_admin,
+            "is_tech": is_tech,
+
+            # 🟦 NUEVO: CATEGORÍAS DISPONIBLES PARA EL SELECT
+            "categories": categories,
+            "current_category_id": t.category.id if t.category else None,
+        }
+    )
+
+
+# ============================================================
+#   ALIAS / REDIRECCIÓN DE TICKETS → LISTADO ACTUAL
+# ============================================================
+@login_required
 def tickets_alias(request):
-    return redirect("ticket_list") if request.user.is_authenticated else redirect("index")
+    """
+    Soporte legacy para URLs antiguas: /tickets/ → /listado/
+    """
+    return redirect("ticket_list")
 
+
+# ============================================================
+#   LOGOUT
+# ============================================================
 def logout_view(request):
+    """
+    Cierra la sesión y redirige al inicio.
+    Se usa en /logout/ y desde los menús del sistema.
+    """
     logout(request)
     return redirect("index")
 
-# ==================== Mantenedor ====================
+
+# ============================================================
+#   MANTENEDOR — INDEX
+# ============================================================
 @login_required
 def maint_index(request):
-    # Solo admin estricto (superuser, staff o grupo "admin") 
-    # o quien tenga el permiso explícito "tickets.access_maint"
+    """
+    Página principal del mantenedor.
+    Solo usuarios con rol admin (estricto) o permiso directo.
+    """
+    # Solo admin estricto (superuser, is_staff, grupo admin)
     if not (_is_admin_strict(request.user) or request.user.has_perm("tickets.access_maint")):
         return HttpResponseForbidden("No autorizado")
 
     sections = Section.objects.filter(is_active=True).order_by("title")
+
     allowed = []
     for s in sections:
         if _is_admin_strict(request.user) or s.groups.filter(
@@ -989,7 +1246,7 @@ def maint_index(request):
                 {"code": s.code, "name": s.title, "title": s.title}
                 for s in allowed
             ],
-        },
+        }
     )
 
 
@@ -2268,6 +2525,7 @@ def reportes_faq(request):
         utilidad_pct = round((utiles / total * 100), 1) if total > 0 else 0
 
         results.append({
+            "id": f["id"],                          # ← AGREGADO
             "question": f["question"],
             "category__name": f["category__name"],
             "total": total,
@@ -2301,3 +2559,206 @@ def maint_areas(request):
     )
 
 
+
+
+#===================
+# NOTIFICACIONES API 
+#===================
+from tickets.models import Notification
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def notifications_list(request):
+    qs = Notification.objects.filter(user=request.user).order_by("-created_at")
+    data = [
+        {
+            "id": n.id,
+            "ticket": n.ticket_id,
+            "type": n.type,
+            "title": n.title,
+            "message": n.message,
+            "created_at": n.created_at.isoformat(),
+            "is_read": n.is_read,
+        }
+        for n in qs
+    ]
+    return Response(data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def notification_mark_read(request, pk):
+    n = get_object_or_404(Notification, pk=pk, user=request.user)
+    n.is_read = True
+    n.save(update_fields=["is_read"])
+    return Response({"ok": True})
+
+
+@login_required
+def ticket_list_state(request, state):
+
+    valid_states = ["open", "in_progress", "resolved", "closed"]
+    pretty_states = {
+        "open": "Abiertos",
+        "in_progress": "En progreso",
+        "resolved": "Resueltos",
+        "closed": "Cerrados",
+    }
+
+    if state not in valid_states:
+        return redirect("ticket_list")
+
+    user = request.user
+    roles = set(user.groups.values_list("name", flat=True))
+    mine = request.GET.get("mine") == "1"   # si viene desde dashboard
+
+    # =========================================
+    #   BASE QUERY SOLO POR ESTADO
+    # =========================================
+    qs = Ticket.objects.filter(state=state).select_related(
+        "category", "priority", "assigned_to"
+    ).order_by("-created_at")
+
+    # =========================================
+    #   APLICAR RBAC CORRECTO
+    # =========================================
+    if "tecnico" in roles:
+        # Técnico → ve solo tickets asignados a él
+        qs = qs.filter(assigned_to=user)
+
+    elif "admin" in roles:
+        if mine:
+            # Admin quiere ver SOLO los ticket creados por él
+            qs = qs.filter(requester=user)
+        else:
+            pass  # Admin ve todo
+
+    else:
+        # Usuario normal → ve solo sus propios tickets
+        qs = qs.filter(requester=user)
+
+    # =========================================
+    #   FILTROS GET AVANZADOS
+    # =========================================
+    category = request.GET.get("category") or ""
+    priority = request.GET.get("priority") or ""
+    assignee = request.GET.get("assignee") or ""
+    from_date = request.GET.get("from") or ""
+    to_date = request.GET.get("to") or ""
+    q = request.GET.get("q") or ""
+
+    # Filtro categoría
+    if category.isdigit():
+        qs = qs.filter(category_id=int(category))
+
+    # Filtro prioridad (usa código real)
+    if priority:
+        qs = qs.filter(priority__code=priority)
+
+    # Filtro asignado
+    if assignee.isdigit():
+        qs = qs.filter(assigned_to_id=int(assignee))
+
+    # Filtro fechas
+    try:
+        if from_date:
+            from_dt = make_aware(datetime.strptime(from_date, "%Y-%m-%d"))
+            qs = qs.filter(created_at__gte=from_dt)
+
+        if to_date:
+            to_dt = make_aware(datetime.strptime(to_date, "%Y-%m-%d")) + timedelta(days=1)
+            qs = qs.filter(created_at__lt=to_dt)
+    except:
+        pass
+
+    # Filtro texto (ID o texto libre)
+    if q.strip():
+        raw = q.strip()
+        m = re.fullmatch(r"#?\s*(\d+)", raw)
+        if m:
+            tid = int(m.group(1))
+            qs = qs.filter(
+                Q(id=tid) |
+                Q(title__icontains=raw) |
+                Q(description__icontains=raw)
+            )
+        else:
+            qs = qs.filter(
+                Q(title__icontains=raw) |
+                Q(description__icontains=raw)
+            )
+
+    tickets = list(qs)
+
+    # =========================================
+    #   Datos para filtros en template
+    # =========================================
+    categories = Category.objects.all().order_by("name")
+    priorities = Priority.objects.all().order_by("sla_minutes")
+    assignees = User.objects.filter(groups__name="tecnico").order_by("username")
+
+    context = {
+        "tickets": tickets,
+        "tickets_count": len(tickets),
+        "state": state,
+        "state_pretty": pretty_states[state],
+
+        # filtros actuales
+        "category": category,
+        "priority": priority,
+        "assignee": assignee,
+        "from": from_date,
+        "to": to_date,
+        "q": q,
+
+        "categories": categories,
+        "priorities": priorities,
+        "assignees": assignees,
+
+        "from_reports": True,
+        "is_tecnico": "tecnico" in roles,
+    }
+
+    return render(request, "tickets/tickets_list.html", context)
+
+
+
+
+
+
+@login_required
+def faq_detail(request, pk):
+    faq = get_object_or_404(FAQ, pk=pk)
+
+    return render(request, "tickets/faq_detail.html", {
+        "faq": faq
+    })
+
+
+
+@login_required
+def ticket_edit(request, pk):
+    ticket = get_object_or_404(Ticket, pk=pk)
+
+    # Solo el solicitante puede editar
+    if request.user != ticket.requester:
+        return HttpResponseForbidden("No autorizado")
+
+    if request.method == "POST":
+        title = request.POST.get("title", "").strip()
+        description = request.POST.get("description", "").strip()
+
+        if not title:
+            messages.error(request, "El título no puede estar vacío.")
+        else:
+            ticket.title = title
+            ticket.description = description
+            ticket.save()
+            messages.success(request, "Ticket actualizado correctamente.")
+            return redirect("ticket_detail", pk=ticket.id)
+
+    return render(request, "tickets/ticket_edit.html", {
+        "ticket": ticket
+    })

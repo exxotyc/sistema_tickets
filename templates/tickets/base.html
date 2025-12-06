@@ -1,4 +1,5 @@
 {# templates/tickets/base.html #}
+{% load static %}
 <!doctype html>
 <html lang="es">
 <head>
@@ -11,6 +12,39 @@
     {% block extra_head %}{% endblock %}
 
     <style>
+        /* ============================================================
+            ÁREA DE SCROLL GLOBAL (PROFESIONAL)
+        ============================================================ */
+        .scroll-area {
+            max-height: 420px;              /* Altura máxima del contenedor */
+            overflow-y: auto;               /* Activa scroll vertical */
+            padding-right: 4px;             /* Mejor look */
+        }
+
+        /* Scrollbar para Chrome / Edge / Opera */
+        .scroll-area::-webkit-scrollbar {
+            width: 7px;
+        }
+        .scroll-area::-webkit-scrollbar-track {
+            background: rgba(255,255,255,0.25);
+            border-radius: 8px;
+        }
+        .scroll-area::-webkit-scrollbar-thumb {
+            background: rgba(0,0,0,0.25);
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.4);
+            backdrop-filter: blur(4px);
+        }
+        .scroll-area::-webkit-scrollbar-thumb:hover {
+            background: rgba(0,0,0,0.35);
+        }
+
+        /* Scrollbar para Firefox */
+        .scroll-area {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(0,0,0,0.35) rgba(255,255,255,0.25);
+        }
+
         :root{ --bg-a:#0ea5e9; --bg-b:#6366f1; --glass:rgba(255,255,255,.78); --glass-border:rgba(255,255,255,.35) }
         html,body{height:100%}
         body{
@@ -20,18 +54,27 @@
             linear-gradient(180deg, #0f172a 0%, #0b1225 100%);
             -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
         }
+
+        /* NAVBAR */
         .navbar{
             backdrop-filter:saturate(140%) blur(10px);
             background:var(--glass)!important;
             border-bottom:1px solid var(--glass-border)!important;
         }
         .navbar-brand{font-weight:700; letter-spacing:.2px}
+
         .badge-soft{background:#fff; border:1px solid rgba(2,6,23,.08); color:#0f172a}
+
+        /* TARJETAS */
         .card{
-            border-radius:1rem; border:1px solid rgba(15,23,42,.06);
-            background:rgba(255,255,255,.92); backdrop-filter:blur(6px);
+            border-radius:1rem;
+            border:1px solid rgba(15,23,42,.06);
+            background:rgba(255,255,255,.92);
+            backdrop-filter:blur(6px);
             box-shadow:0 18px 40px rgba(2,6,23,.12);
         }
+
+        /* BOTONES */
         .btn{border-radius:.75rem; position:relative; overflow:hidden}
         .btn-ripple::after{
             content:""; position:absolute; width:0; height:0; border-radius:50%;
@@ -39,37 +82,56 @@
             left:var(--x,50%); top:var(--y,50%); transition:width .4s ease, height .4s ease;
         }
         .btn-ripple:active::after{width:220px; height:220px}
+
+        /* BOTÓN FLOTANTE NOTIF */
         .notif-fab{
             position:fixed; right:18px; bottom:18px; z-index:1080;
             border-radius:999px; padding:.65rem .8rem;
             box-shadow:0 10px 24px rgba(2,6,23,.16);
         }
         .notif-badge{ position:absolute; top:-6px; right:-6px; }
+
+        /* ANIMACIÓN PANEL */
+        #notifPanel {
+            animation: fadeSlide .25s ease-out;
+        }
+        @keyframes fadeSlide {
+            from { opacity: 0; transform: translateY(12px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
     </style>
 </head>
+
+<!-- Toast Container -->
+<div id="toastContainer"
+     class="toast-container position-fixed top-0 end-0 p-3"
+     style="z-index: 2000;">
+</div>
+
 
 <body>
 
 {% if request.user.is_authenticated %}
+    <!-- BOTÓN FLOTANTE DE NOTIFICACIONES -->
     <button id="btnNotif" class="btn btn-primary notif-fab btn-ripple">
         <i class="bi bi-bell"></i>
         <span id="notifCount" class="badge text-bg-danger notif-badge d-none">0</span>
     </button>
 
+    <!-- PANEL DE NOTIFICACIONES -->
     <div id="notifPanel" class="card shadow-sm"
          style="position:fixed; right:18px; bottom:74px; width:320px; display:none; z-index:1080;">
-        <div class="card-header d-flex justify-content-between">
-            <span>Notificaciones</span>
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span class="fw-semibold">Notificaciones</span>
             <button id="notifClose" class="btn btn-sm btn-outline-secondary">
                 <i class="bi bi-x-lg"></i>
             </button>
         </div>
-        <ul id="notifList" class="list-group list-group-flush">
+            <ul id="notifList" class="list-group list-group-flush scroll-area">
             <li class="list-group-item text-muted">Sin notificaciones.</li>
         </ul>
     </div>
 {% endif %}
-
 
 {% if request.user.is_authenticated %}
 <nav class="navbar navbar-expand-md sticky-top">
@@ -92,28 +154,25 @@
                     </a></li>
 
                     {% if is_admin or is_tecnico %}
-                    <li class="nav-item"><a class="nav-link" href="{% url 'metrics_page' %}">
-                        <i class="bi bi-graph-up me-1"></i> Métricas </a>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'metrics_page' %}">
+                            <i class="bi bi-graph-up me-1"></i> Métricas
+                        </a>
                     </li>
                     {% endif %}
 
                     <li class="nav-item"><a class="nav-link" href="{% url 'ticket_list' %}">
-                        <i class="bi bi-list-ul me-1"></i> Listado 
+                        <i class="bi bi-list-ul me-1"></i> Listado
                     </a></li>
 
                     <li class="nav-item"><a class="nav-link" href="{% url 'faq' %}">
                         <i class="bi bi-question-circle me-1"></i> FAQ
                     </a></li>
 
-                    {% if is_tecnico %}
-                      <li class="nav-item"><a class="nav-link" href="{% url 'ticket_list_assigned' %}">Mis Tickets</a></li>
-                      <li class="nav-item"><a class="nav-link" href="{% url 'ticket_list_all' %}">Todos los Tickets</a></li>
-                    {% endif %}
-
                     {% if is_admin or is_tecnico %}
-                    <li class="nav-item"><a class="nav-link" href="{% url 'reports_page' %}">
-                        <i class="bi bi-file-bar-graph me-1"></i> Reportes
-                    </a></li>
+                        <li class="nav-item"><a class="nav-link" href="{% url 'reports_page' %}">
+                            <i class="bi bi-file-bar-graph me-1"></i> Reportes
+                        </a></li>
                     {% endif %}
 
                     {% if is_admin and maint_sections %}
@@ -123,18 +182,21 @@
                         </a>
                         <ul class="dropdown-menu">
                             {% for s in maint_sections %}
-                            <li><a class="dropdown-item" href="{% url 'maint_section' s.code %}">{{ s.title }}</a></li>
+                                <li><a class="dropdown-item" href="{% url 'maint_section' s.code %}">
+                                    {{ s.title }}
+                                </a></li>
                             {% endfor %}
                             <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item" href="{% url 'maint_index' %}">Ver todas</a></li>
                         </ul>
                     </li>
 
-                    <li class="nav-item"><a class="nav-link" href="{% url 'sistema_page' %}">
-                        <i class="bi bi-hdd-network me-1"></i> Sistema
-                    </a></li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'sistema_page' %}">
+                            <i class="bi bi-hdd-network me-1"></i> Sistema
+                        </a>
+                    </li>
                     {% endif %}
-
                 {% endif %}
             </ul>
 
@@ -150,11 +212,9 @@
                     </a>
                 {% endif %}
             </div>
-
         </div>
     </div>
 </nav>
-
 
 <main class="container my-4">
     {% if messages %}
@@ -170,7 +230,6 @@
 <footer class="py-4 text-center text-muted">
     <div class="container">© {% now "Y" %} Coyahue</div>
 </footer>
-
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
@@ -292,6 +351,145 @@ async function api(url, opts={}){
     }
   }
 })();
+</script>
+
+<script>
+/* ============================================================
+      SONIDO DE NOTIFICACIÓN
+============================================================ */
+const notifSound = new Audio("{% static 'sounds/notify.mp3' %}");
+notifSound.volume = 0.35;
+
+/* ============================================================
+      ICONOS POR TIPO
+============================================================ */
+function notifIcon(type){
+    switch(type){
+        case "assigned": return "bi-person-check";
+        case "autoassigned": return "bi-lightning-charge";
+        case "created": return "bi-plus-circle";
+        case "state_change": return "bi-arrow-repeat";
+        case "comment": return "bi-chat-text";
+        case "sla_risk": return "bi-alarm";
+        default: return "bi-bell";
+    }
+}
+
+/* ============================================================
+      CARGAR NOTIFICACIONES
+============================================================ */
+async function loadNotifications() {
+    try {
+        const r = await api("/api/notifications/");
+        if (!r.ok) return;
+
+        const data = await r.json();
+
+        const unread = data.filter(n => !n.is_read).length;
+        const notifCount = document.getElementById("notifCount");
+        const list = document.getElementById("notifList");
+
+        // Sonar si hay nuevas notificaciones
+        const lastUnread = window._lastUnread || 0;
+        if(unread > lastUnread){
+            notifSound.play().catch(()=>{});
+        }
+        window._lastUnread = unread;
+
+        // Actualizar contador
+        if (unread > 0) {
+            notifCount.textContent = unread;
+            notifCount.classList.remove("d-none");
+        } else {
+            notifCount.classList.add("d-none");
+        }
+
+        // Construir lista
+        if (data.length === 0) {
+            list.innerHTML = `<li class="list-group-item text-muted">Sin notificaciones.</li>`;
+            return;
+        }
+
+        let html = "";
+        data.forEach(n => {
+            html += `
+                <li class="list-group-item ${n.is_read ? "" : "fw-bold bg-light"} notif-item"
+                    onclick="openTicket(${n.ticket}, ${n.id})"
+                    style="cursor:pointer;">
+                    
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="bi ${notifIcon(n.type)} text-primary"></i>
+                        <div>
+                            <div>${n.title}</div>
+                            <div class="small text-muted">${n.message}</div>
+                            <div class="small text-secondary">Hace ${timeAgo(n.created_at)}</div>
+                        </div>
+                    </div>
+                </li>
+            `;
+        });
+
+        list.innerHTML = html;
+
+    } catch (e) {
+        console.error("Error cargando notificaciones:", e);
+    }
+}
+
+/* ============================================================
+      MARCAR COMO LEÍDA
+============================================================ */
+async function markNotificationRead(id) {
+    await api(`/api/notifications/read/${id}/`, { method: "POST" });
+    loadNotifications();
+}
+
+/* ============================================================
+      ABRIR TICKET DIRECTAMENTE
+============================================================ */
+async function openTicket(ticketId, notifId){
+    await markNotificationRead(notifId);
+    window.location.href = `/tickets/${ticketId}/`;
+}
+
+/* ============================================================
+      TIME AGO
+============================================================ */
+function timeAgo(dateString) {
+    const date = new Date(dateString);
+    const diff = (new Date() - date) / 1000;
+
+    if (diff < 60) return "unos segundos";
+    if (diff < 3600) return Math.floor(diff / 60) + " min";
+    if (diff < 86400) return Math.floor(diff / 3600) + " h";
+    return Math.floor(diff / 86400) + " días";
+}
+
+/* ============================================================
+      TOGGLE PANEL
+============================================================ */
+document.addEventListener("DOMContentLoaded", () => {
+    const btn = document.getElementById("btnNotif");
+    const panel = document.getElementById("notifPanel");
+    const close = document.getElementById("notifClose");
+
+    btn.addEventListener("click", () => {
+        const visible = panel.style.display === "block";
+        panel.style.display = visible ? "none" : "block";
+        if (!visible) loadNotifications();
+    });
+
+    close.addEventListener("click", () => {
+        panel.style.display = "none";
+    });
+
+    // Carga inicial + refresco cada 20 segundos
+    loadNotifications();
+    setInterval(loadNotifications, 20000);
+});
+
+
+
 </script>
 {% endif %}
 

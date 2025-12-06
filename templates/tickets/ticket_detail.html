@@ -87,14 +87,27 @@
      data-admin="{% if is_admin %}1{% else %}0{% endif %}">
 
   <div class="d-flex justify-content-between align-items-center mb-2">
-    <h1 id="tTitle" class="h5 m-0"><i class="bi bi-ticket-perforated"></i> Ticket</h1>
-    <a href="{% url 'ticket_list' %}" class="btn btn-outline-secondary btn-sm" data-hard-nav="1">
-      <i class="bi bi-arrow-left"></i> Volver
-    </a>
+    <h1 id="tTitle" class="h5 m-0">
+      <i class="bi bi-ticket-perforated"></i> Ticket
+    </h1>
+
+    <div class="d-flex gap-2">
+      {% if request.user.id == ticket.requester.id %}
+      <a href="{% url 'ticket_edit' ticket.id %}" class="btn btn-outline-primary btn-sm">
+        <i class="bi bi-pencil-square"></i> Editar ticket
+      </a>
+      {% endif %}
+
+      <a href="{% url 'ticket_list' %}" class="btn btn-outline-secondary btn-sm" data-hard-nav="1">
+        <i class="bi bi-arrow-left"></i> Volver
+      </a>
+    </div>
   </div>
 
   <div class="row g-3">
-    <!-- -------- COLUMNA PRINCIPAL -------- -->
+    <!-- =========================
+         COLUMNA PRINCIPAL
+    ============================== -->
     <div class="col-lg-8">
 
       <!-- Tabs -->
@@ -115,23 +128,54 @@
 
       <div class="ticket-tab-content">
 
-        <!-- TAB: DETALLES -->
-        <div class="ticket-tab-pane active" data-tab-pane="details">
-          <div class="card">
-            <div class="card-body">
-              <div class="d-flex justify-content-between gap-2 mb-1">
-                <h5 class="mb-0" id="title">—</h5>
-                <div class="d-flex gap-1">
-                  <span id="badgeState" class="badge text-bg-secondary">—</span>
-                  <span id="badgePriority" class="badge text-bg-light border">—</span>
-                </div>
-              </div>
-              <p id="description" class="text-muted small mb-0">—</p>
-            </div>
-          </div>
-        </div>
+<!-- =========================
+     TAB: DETALLES
+============================== -->
+<div class="ticket-tab-pane active" data-tab-pane="details">
+  <div class="card">
+    <div class="card-body">
 
-        <!-- TAB: COMENTARIOS -->
+      <!-- Encabezado -->
+      <div class="d-flex justify-content-between gap-2 mb-2">
+        <!-- Vista normal -->
+        <h5 class="mb-0" id="titleView">—</h5>
+
+        <!-- Campo editable (oculto por defecto) -->
+        <input id="editTitle" class="form-control form-control-sm d-none" />
+
+        <div class="d-flex gap-1">
+          <span id="badgeState" class="badge text-bg-secondary">—</span>
+          <span id="badgePriority" class="badge text-bg-light border">—</span>
+        </div>
+      </div>
+
+      <!-- Descripción (vista normal) -->
+      <p id="descriptionView" class="text-muted small mb-2">—</p>
+
+      <!-- Descripción editable -->
+      <textarea id="editDescription" class="form-control form-control-sm d-none mb-2" rows="3"></textarea>
+
+      <!-- Botones -->
+      <div class="d-flex gap-2 mt-2">
+        <!-- Editar (solo visible según permisos JS) -->
+        <button id="btnEditTicket" class="btn btn-outline-primary btn-sm d-none">
+          <i class="bi bi-pencil"></i> Editar ticket
+        </button>
+
+        <!-- Guardar cambios -->
+        <button id="btnSaveTicket" class="btn btn-primary btn-sm d-none">
+          <i class="bi bi-save"></i> Guardar cambios
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+
+        <!-- =========================
+             TAB: COMENTARIOS
+        ============================== -->
         <div class="ticket-tab-pane" data-tab-pane="comments">
           <div class="card">
             <div class="card-body comments-wrapper">
@@ -141,16 +185,21 @@
               <form id="frmComment" class="d-flex gap-2 mt-2 pt-1">
                 <input id="commentText" class="form-control form-control-sm"
                        placeholder="Escribe un comentario…" required>
-                <button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-send"></i></button>
+                <button class="btn btn-primary btn-sm" type="submit">
+                  <i class="bi bi-send"></i>
+                </button>
               </form>
             </div>
           </div>
         </div>
 
-        <!-- TAB: ADJUNTOS -->
+        <!-- =========================
+             TAB: ADJUNTOS
+        ============================== -->
         <div class="ticket-tab-pane" data-tab-pane="attachments">
           <div class="card">
             <div class="card-body">
+
               <h6 class="mb-2"><i class="bi bi-paperclip me-1"></i> Archivos</h6>
 
               <div id="attachments" class="list-group attachments-scroll mb-2"></div>
@@ -163,11 +212,14 @@
                   <i class="bi bi-upload"></i> Subir
                 </button>
               </form>
+
             </div>
           </div>
         </div>
 
-        <!-- TAB: HISTORIAL -->
+        <!-- =========================
+             TAB: HISTORIAL
+        ============================== -->
         <div class="ticket-tab-pane" data-tab-pane="history">
           <div class="card">
             <div class="card-body">
@@ -180,56 +232,65 @@
       </div>
     </div>
 
-    <!-- -------- COLUMNA LATERAL -------- -->
+    <!-- =========================
+         COLUMNA DERECHA (META)
+    ============================== -->
     <div class="col-lg-4">
 
+      <!-- METADATOS -->
       <div class="card mb-2">
         <div class="card-body">
           <h6 class="mb-2">Detalle</h6>
+
           <dl class="row meta small">
-            <dt class="col-4">ID</dt><dd class="col-8" id="m_id">—</dd>
-            <dt class="col-4">Estado</dt><dd class="col-8" id="m_state">—</dd>
-            <dt class="col-4">Prioridad</dt><dd class="col-8" id="m_priority">—</dd>
-            <dt class="col-4">Categoría</dt><dd class="col-8" id="m_category">—</dd>
-            <dt class="col-4">Solicitante</dt><dd class="col-8" id="m_requester">—</dd>
-            <dt class="col-4">Asignado</dt><dd class="col-8" id="m_assigned">—</dd>
-            <dt class="col-4">Área solicitante</dt>
-            <dd class="col-8" id="m_requester_area">—</dd>
-            <dt class="col-4">Área técnico</dt>
-            <dd class="col-8" id="m_assigned_area">—</dd>
-            <dt class="col-4">Creado</dt><dd class="col-8" id="m_created">—</dd>
-            <dt class="col-4">Actualizado</dt><dd class="col-8" id="m_updated">—</dd>
+            <dt class="col-4">ID</dt> <dd class="col-8" id="m_id">—</dd>
+            <dt class="col-4">Estado</dt> <dd class="col-8" id="m_state">—</dd>
+            <dt class="col-4">Prioridad</dt> <dd class="col-8" id="m_priority">—</dd>
+            <dt class="col-4">Categoría</dt> <dd class="col-8" id="m_category">—</dd>
+            <dt class="col-4">Solicitante</dt> <dd class="col-8" id="m_requester">—</dd>
+            <dt class="col-4">Asignado</dt> <dd class="col-8" id="m_assigned">—</dd>
+            <dt class="col-4">Área Solicitante</dt> <dd class="col-8" id="m_requester_area">—</dd>
+            <dt class="col-4">Área Técnico</dt> <dd class="col-8" id="m_assigned_area">—</dd>
+            <dt class="col-4">Creado</dt> <dd class="col-8" id="m_created">—</dd>
+            <dt class="col-4">Actualizado</dt> <dd class="col-8" id="m_updated">—</dd>
           </dl>
         </div>
       </div>
 
-      <!-- Panel de acciones -->
+      <!-- PANEL DE ACCIONES (Solo técnico/admin) -->
       <div id="adminPanel" class="card d-none">
         <div class="card-body">
-          <h6 class="mb-2"><i class="bi bi-tools me-1"></i> Acciones</h6>
+          <h6 class="mb-2">
+            <i class="bi bi-tools me-1"></i> Acciones
+          </h6>
 
-          <div id="techContextMsg" class="small text-muted mb-1"></div>
+          <div id="techContextMsg" class="small text-muted mb-2"></div>
 
-          <!-- Asignación -->
+                    <!-- ASIGNACIÓN -->
           <div id="assignSection" class="mb-2">
-            <label class="form-label small">Asignar a</label>
-            <div class="d-flex gap-2">
-              <select id="techSelect" class="form-select form-select-sm">
-                <option disabled>Cargando…</option>
-              </select>
-              <button id="btnAssign" class="btn btn-primary btn-sm"><i class="bi bi-person-check"></i></button>
-            </div>
-            <div id="assignMsg" class="form-text small"></div>
+              <label class="form-label small">Asignar a</label>
+              <div class="d-flex gap-2">
+                  <select id="techSelect" class="form-select form-select-sm">
+                      <option disabled>Cargando…</option>
+                  </select>
+                  <button id="btnAssign" class="btn btn-primary btn-sm"><i class="bi bi-person-check"></i></button>
+              </div>
+              <div id="assignMsg" class="form-text small"></div>
+
+              <!-- 🔥 NUEVO -->
+              <div id="techLockMsg" class="form-text text-muted small d-none"></div>
           </div>
 
-          <!-- Tomar ticket -->
+          <!-- TOMAR TICKET -->
           <button id="btnTakeTicket" class="btn btn-outline-primary btn-sm w-100 mb-2 d-none">
             <i class="bi bi-hand-index-thumb"></i> Tomar ticket
           </button>
 
-          <!-- Estado / prioridad -->
+          <!-- EDITAR META: ESTADO / PRIORIDAD / CATEGORÍA -->
           <div class="row g-1">
-            <div class="col-6">
+
+            <!-- Estado -->
+            <div class="col-4">
               <label class="form-label small">Estado</label>
               <select id="stateSelect" class="form-select form-select-sm">
                 <option value="open">Abierto</option>
@@ -238,28 +299,53 @@
                 <option value="closed">Cerrado</option>
               </select>
             </div>
-            <div class="col-6">
+
+            <!-- Prioridad -->
+            <div class="col-4">
               <label class="form-label small">Prioridad</label>
               <select id="prioSelect" class="form-select form-select-sm"></select>
             </div>
+
+            <!-- Categoría (nuevo) -->
+            <div class="col-4">
+              <label class="form-label small">Categoría</label>
+              <select id="categorySelect" class="form-select form-select-sm">
+                <option value="">—</option>
+                {% for c in categories %}
+                <option value="{{ c.id }}">{{ c.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+
           </div>
 
+          <!-- Botones de acción -->
           <div class="d-flex flex-wrap gap-1 mt-2">
-            <button id="btnSaveMeta" class="btn btn-outline-primary btn-sm"><i class="bi bi-save"></i></button>
-            <button id="btnStart" class="btn btn-outline-secondary btn-sm"><i class="bi bi-play"></i></button>
-            <button id="btnResolve" class="btn btn-outline-success btn-sm"><i class="bi bi-check2-circle"></i></button>
-            <button id="btnClose" class="btn btn-outline-dark btn-sm"><i class="bi bi-lock"></i></button>
-            <button id="btnReopen" class="btn btn-outline-warning btn-sm"><i class="bi bi-arrow-counterclockwise"></i></button>
+            <button id="btnSaveMeta" class="btn btn-outline-primary btn-sm">
+              <i class="bi bi-save"></i>
+            </button>
+            <button id="btnStart" class="btn btn-outline-secondary btn-sm">
+              <i class="bi bi-play"></i>
+            </button>
+            <button id="btnResolve" class="btn btn-outline-success btn-sm">
+              <i class="bi bi-check2-circle"></i>
+            </button>
+            <button id="btnClose" class="btn btn-outline-dark btn-sm">
+              <i class="bi bi-lock"></i>
+            </button>
+            <button id="btnReopen" class="btn btn-outline-warning btn-sm">
+              <i class="bi bi-arrow-counterclockwise"></i>
+            </button>
           </div>
-
         </div>
       </div>
 
     </div>
+
   </div>
 </div>
-{% endblock %}
 
+{% endblock %}
 
 {% block auth_protect %}
 <script>
@@ -286,6 +372,32 @@ let CURRENT_USER = null;
 let CURRENT_ROLES = [];
 let CURRENT_TICKET = null;
 
+function showToast(message, type="error") {
+    const container = document.getElementById("toastContainer");
+    if (!container) return;
+
+    const toast = document.createElement("div");
+    toast.className = "toast align-items-center text-bg-" +
+        (type === "success" ? "success" : "danger") +
+        " border-0 show";
+    toast.role = "alert";
+    toast.ariaLive = "assertive";
+    toast.ariaAtomic = "true";
+
+    toast.innerHTML = `
+      <div class="d-flex">
+        <div class="toast-body">${esc(message)}</div>
+        <button type="button" class="btn-close btn-close-white me-2 m-auto"
+                data-bs-dismiss="toast" aria-label="Close"></button>
+      </div>
+    `;
+
+    container.appendChild(toast);
+
+    // Auto remover en 4s
+    setTimeout(() => toast.remove(), 4000);
+}
+
 // =====================================================
 //   HELPERS
 // =====================================================
@@ -303,10 +415,12 @@ async function api(url, opts = {}) {
   const isWrite = ["POST","PUT","PATCH","DELETE"].includes((opts.method || "").toUpperCase());
   const isForm = opts.body instanceof FormData;
 
-  if (isWrite && !isForm) {
-    headers["Content-Type"] = "application/json";
+  if (isWrite) {
+    if (!isForm) {
+        headers["Content-Type"] = "application/json";
+    }
     headers["X-CSRFToken"] = getCookie("csrftoken");
-  }
+}
 
   const finalOpts = { ...opts, headers };
 
@@ -459,8 +573,9 @@ async function loadTicket(){
   CURRENT_TICKET = data;
 
   document.getElementById("tTitle").innerHTML = `<i class="bi bi-ticket-perforated"></i> Ticket #${data.id}`;
-  document.getElementById("title").textContent = data.title;
-  document.getElementById("description").textContent = data.description;
+  document.getElementById("titleView").textContent = data.title;
+  document.getElementById("descriptionView").textContent = data.description;
+
 
   document.getElementById("m_id").textContent = data.id;
   document.getElementById("m_state").textContent = data.state_display || data.state;
@@ -476,6 +591,19 @@ async function loadTicket(){
   renderStateBadge(data.state);
   renderPriorityBadge(data.priority_name || "");
 
+  // === FIX CATEGORÍA ===
+  const catSel = document.getElementById("categorySelect");
+
+  if (catSel) {
+      if (data.category) {
+          const opt = catSel.querySelector(`option[value="${data.category}"]`);
+          if (opt) catSel.value = data.category;
+          else catSel.value = "";
+      } else {
+          catSel.value = "";
+      }
+  }
+
   const stateSel=document.getElementById("stateSelect");
   const prioSel=document.getElementById("prioSelect");
 
@@ -485,9 +613,11 @@ async function loadTicket(){
   applyPermissionUI();
 }
 
+
 // =====================================================
-//   COMENTARIOS
+//   COMENTARIOS — FIX DEFINITIVO
 // =====================================================
+
 async function loadComments(){
   const wrap=document.getElementById("commentsList");
   wrap.innerHTML='<div class="text-muted small">Cargando comentarios…</div>';
@@ -526,50 +656,74 @@ async function loadComments(){
 }
 
 document.addEventListener("DOMContentLoaded",()=>{
-  const frm=document.getElementById("frmComment");
-  if(!frm) return;
+  const form = document.getElementById("frmComment");
+  if(!form) return;
 
-  frm.onsubmit=async e=>{
+  form.addEventListener("submit", async (e)=>{
     e.preventDefault();
-    const txt=document.getElementById("commentText").value.trim();
-    if(!txt) return;
+    
+    const input = document.getElementById("commentText");
+    const text = input.value.trim();
+    if(!text) return;
 
-    const res = await sendJSON("/api/comments/","POST",{ ticket:TICKET_ID, content:txt });
-    if(!res.ok){ alert(res.error); return; }
+    // 🔥 FIX: enviar JSON correcto con CSRF correcto
+    const res = await api("/api/comments/", {
+      method: "POST",
+      body: JSON.stringify({
+        ticket: TICKET_ID,
+        content: text
+      })
+    });
 
-    document.getElementById("commentText").value="";
+    if(!res.ok){
+      try {
+        const err = await res.json();
+        alert("Error: " + (err.detail || err.error || JSON.stringify(err)));
+      } catch(_) {
+        alert("No se pudo enviar el comentario");
+      }
+      return;
+    }
+
+    input.value = "";
     loadComments();
-  };
+  });
 });
 
+
 // =====================================================
-//   ADJUNTOS
+//   ADJUNTOS (SUBIDA + LISTADO, SIN RECARGAR PESTAÑA)
 // =====================================================
 async function loadAttachments(){
-  const cont=document.getElementById("attachments");
-  cont.innerHTML='<div class="list-group-item small">Cargando…</div>';
+  const cont = document.getElementById("attachments");
+  if (!cont) return;
+
+  cont.innerHTML = '<div class="list-group-item small">Cargando…</div>';
 
   const r = await api(`/api/attachments/?ticket=${TICKET_ID}`);
-  if(!r.ok){
-    cont.innerHTML='<div class="list-group-item text-danger">Error cargando adjuntos.</div>';
+  if (!r.ok){
+    cont.innerHTML =
+      '<div class="list-group-item text-danger">Error cargando adjuntos.</div>';
     return;
   }
 
-  const data=await r.json();
-  const list=data.results || data;
+  const data = await r.json();
+  const list = data.results || data;
 
-  if(!list.length){
-    cont.innerHTML='<div class="list-group-item small text-muted">Sin adjuntos.</div>';
+  if (!list.length){
+    cont.innerHTML =
+      '<div class="list-group-item small text-muted">Sin adjuntos.</div>';
     return;
   }
 
-  cont.innerHTML="";
-  list.forEach(a=>{
-    const li=document.createElement("a");
-    li.href=a.file;
-    li.target="_blank";
-    li.className="list-group-item list-group-item-action d-flex align-items-center gap-2";
-    li.innerHTML=`
+  cont.innerHTML = "";
+  list.forEach(a => {
+    const li = document.createElement("a");
+    li.href = a.file;
+    li.target = "_blank";
+    li.className =
+      "list-group-item list-group-item-action d-flex align-items-center gap-2";
+    li.innerHTML = `
       <i class="bi bi-paperclip"></i>
       <span>${esc(a.filename)}</span>
       <small class="text-muted ms-auto">${fmt(a.created_at)}</small>
@@ -578,31 +732,66 @@ async function loadAttachments(){
   });
 }
 
-document.addEventListener("DOMContentLoaded",()=>{
-  const frm=document.getElementById("frmAttach");
-  if(!frm) return;
+document.addEventListener("DOMContentLoaded", () => {
+  const frm = document.getElementById("frmAttach");
+  if (!frm) return;
 
-  frm.onsubmit=async e=>{
+  frm.addEventListener("submit", async (e) => {
+    // 🚫 BLOQUEAR SUBMIT NATIVO SIEMPRE
     e.preventDefault();
-    const file = document.getElementById("file").files[0];
-    if(!file) return;
+    e.stopPropagation();
 
-    const fd=new FormData();
-    fd.append("ticket",TICKET_ID);
-    fd.append("file",file);
+    const fileInput = document.getElementById("file");
+    const file = fileInput?.files?.[0];
 
-    const r = await api("/api/attachments/",{
-      method:"POST",
-      body:fd
-    });
-
-    if(!r.ok){
-      alert("Error al subir archivo");
-      return;
+    if (!file) {
+      // nada que subir, no hacemos nada pero tampoco recargamos
+      return false;
     }
-    document.getElementById("file").value="";
-    loadAttachments();
-  };
+
+    const fd = new FormData();
+    fd.append("ticket", TICKET_ID);
+    fd.append("file", file);
+
+    try {
+      const r = await api("/api/attachments/", {
+        method: "POST",
+        body: fd
+      });
+
+if (!r.ok) {
+    let msg = "Error al subir archivo";
+
+    try {
+        const err = await r.json();
+        if (err.file) {
+            msg = Array.isArray(err.file) ? err.file.join(" ") : err.file;
+        } else if (err.detail || err.error) {
+            msg = err.detail || err.error;
+        } else {
+            msg = JSON.stringify(err);
+        }
+    } catch (_) {}
+
+    showToast(msg, "error");
+    return false;
+}
+
+        showToast("Archivo subido correctamente", "success");
+
+      // ✅ OK: limpiar input y recargar lista
+      fileInput.value = "";
+      await loadAttachments();
+
+    } catch (err) {
+      console.error("UPLOAD ERROR:", err);
+      alert("❌ Error inesperado al subir el archivo.");
+      return false;
+    }
+
+    // Por si acaso, doble seguro para bloquear cualquier submit nativo
+    return false;
+  });
 });
 
 // =====================================================
@@ -669,10 +858,49 @@ async function loadUsers(){
 // =====================================================
 //   META (estado / prioridad)
 // =====================================================
-async function saveMeta(state, priority){
-  const res = await sendJSON(`/api/tickets/${TICKET_ID}/`, "PATCH", { state, priority });
-  if(!res.ok){ alert(res.error); return; }
-  await loadTicket();
+async function saveMeta(state, priority) {
+
+    const category = document.getElementById("categorySelect")
+        ? document.getElementById("categorySelect").value
+        : null;
+
+    const payload = {
+        state,
+        priority,
+        category
+    };
+
+    const r = await api(`/api/tickets/${TICKET_ID}/`, {
+        method: "PATCH",
+        body: JSON.stringify(payload)
+    });
+
+    if (!r.ok) {
+        showToast("Error al guardar cambios", "error");
+        return;
+    }
+
+    const data = await r.json();
+
+    // ===========================
+    //   ACTUALIZACIÓN EN PANTALLA
+    // ===========================
+
+    // Meta lateral
+    document.getElementById("m_state").textContent = data.state_display;
+    document.getElementById("m_priority").textContent = data.priority_name;
+    document.getElementById("m_category").textContent = data.category_name;
+
+    // Badges superiores
+    renderStateBadge(data.state);
+    renderPriorityBadge(data.priority_name);
+
+    // Actualizar datos globales
+    CURRENT_TICKET.state = data.state;
+    CURRENT_TICKET.priority_name = data.priority_name;
+    CURRENT_TICKET.category_name = data.category_name;
+
+    showToast("Cambios guardados correctamente", "success");
 }
 
 // =====================================================
@@ -723,146 +951,206 @@ document.addEventListener("DOMContentLoaded",()=>{
 // =====================================================
 //   PERMISOS UI
 // =====================================================
-function applyPermissionUI(){
-  const adminP = document.getElementById("adminPanel");
-  const techMsg = document.getElementById("techContextMsg");
-  const assignSection = document.getElementById("assignSection");
-  const btnTake=document.getElementById("btnTakeTicket");
+function applyPermissionUI() {
 
-  const frmComment=document.getElementById("frmComment");
-  const frmAttach=document.getElementById("frmAttach");
+    const adminP = document.getElementById("adminPanel");
+    const techMsg = document.getElementById("techContextMsg");
+    const assignSection = document.getElementById("assignSection");
+    const btnTake = document.getElementById("btnTakeTicket");
 
-  function disableForms(){
-    if(frmComment){
-      frmComment.style.display="none";
-      frmComment.querySelector("input").disabled=true;
-      frmComment.querySelector("button").disabled=true;
-      frmComment.onsubmit=e=>{e.preventDefault();return false;};
-    }
-    if(frmAttach){
-      frmAttach.style.display="none";
-      frmAttach.querySelector("input").disabled=true;
-      frmAttach.querySelector("button").disabled=true;
-      frmAttach.onsubmit=e=>{e.preventDefault();return false;};
-    }
-  }
+    const techLockMsg = document.getElementById("techLockMsg");   // mensaje NUEVO
+    const assignMsg = document.getElementById("assignMsg");       // mensaje de API
 
-  function enableForms(){
-    if(frmComment){
-      frmComment.style.display="flex";
-      frmComment.querySelector("input").disabled=false;
-      frmComment.querySelector("button").disabled=false;
-      frmComment.onsubmit=null;
-    }
-    if(frmAttach){
-      frmAttach.style.display="flex";
-      frmAttach.querySelector("input").disabled=false;
-      frmAttach.querySelector("button").disabled=false;
-      frmAttach.onsubmit=null;
-    }
-  }
+    const frmComment = document.getElementById("frmComment");
+    const frmAttach = document.getElementById("frmAttach");
 
-  if(!CURRENT_USER || !CURRENT_TICKET){
+    // Helpers internos
+    function disableForms(){
+        if(frmComment){
+            frmComment.style.display="none";
+            frmComment.querySelector("input").disabled=true;
+            frmComment.querySelector("button").disabled=true;
+        }
+        if(frmAttach){
+            frmAttach.style.display="none";
+            frmAttach.querySelector("input").disabled=true;
+            frmAttach.querySelector("button").disabled=true;
+        }
+    }
+
+    function enableForms(){
+        if(frmComment){
+            frmComment.style.display="flex";
+            frmComment.querySelector("input").disabled=false;
+            frmComment.querySelector("button").disabled=false;
+        }
+        if(frmAttach){
+            frmAttach.style.display="flex";
+            frmAttach.querySelector("input").disabled=false;
+            frmAttach.querySelector("button").disabled=false;
+        }
+    }
+
+    // Si no hay datos cargados, bloquear todo
+    if(!CURRENT_USER || !CURRENT_TICKET){
+        adminP.classList.add("d-none");
+        disableForms();
+        return;
+    }
+
+    // Roles reales del usuario (sin SERVER_ADMIN)
+    const roles = CURRENT_ROLES || [];
+    const isAdmin = roles.includes("admin");
+    const isTech = roles.includes("tecnico");
+
+    const userId = CURRENT_USER.id;
+    const assignedId = CURRENT_TICKET.assigned_to || null;
+
+    const stateSel = document.getElementById("stateSelect");
+    const prioSel = document.getElementById("prioSelect");
+    const catSel = document.getElementById("categorySelect");
+
+    const btnSave = document.getElementById("btnSaveMeta");
+    const btnStart = document.getElementById("btnStart");
+    const btnResolve = document.getElementById("btnResolve");
+    const btnClose = document.getElementById("btnClose");
+    const btnReopen = document.getElementById("btnReopen");
+    const btnAssign = document.getElementById("btnAssign");
+
+    const buttons = [btnSave, btnStart, btnResolve, btnClose, btnReopen];
+
+    // ===============================
+    //   LIMPIAR MENSAJES
+    // ===============================
+    if (assignMsg) {
+        assignMsg.textContent = "";
+        assignMsg.className = "form-text";
+    }
+    if (techLockMsg) {
+        techLockMsg.classList.add("d-none");
+        techLockMsg.textContent = "";
+    }
+
+    // ===============================
+    //   ADMINISTRADOR (control total)
+    // ===============================
+    if (isAdmin) {
+
+        adminP.classList.remove("d-none");
+
+        if (techMsg) {
+            techMsg.textContent = "Eres administrador: control total.";
+        }
+
+      document.getElementById("btnEditTicket").classList.remove("d-none");
+
+
+        assignSection.classList.remove("d-none");
+        btnTake.classList.add("d-none");
+
+        btnAssign.disabled = false;
+        stateSel.disabled = false;
+        prioSel.disabled = false;
+        if (catSel) catSel.disabled = false;
+
+        buttons.forEach(b => b.disabled = false);
+
+        enableForms();
+        return;
+    }
+
+    // ===============================
+    //   TÉCNICO
+    // ===============================
+    if (isTech) {
+
+        adminP.classList.remove("d-none");
+
+        // ---- Ticket NO asignado todavía ----
+        if (!assignedId) {
+
+            if (techMsg) techMsg.textContent = "Ticket sin asignar. Puedes tomarlo.";
+
+            assignSection.classList.add("d-none");
+            btnTake.classList.remove("d-none");
+
+            stateSel.disabled = true;
+            prioSel.disabled = true;
+            if (catSel) catSel.disabled = true;
+
+            buttons.forEach(b => b.disabled = true);
+
+            disableForms();
+            return;
+        }
+
+      document.getElementById("btnEditTicket").classList.remove("d-none");
+
+
+        // ---- Ticket asignado a este técnico ----
+        if (assignedId === userId) {
+
+            if (techMsg) techMsg.textContent = "Ticket asignado a ti.";
+
+            assignSection.classList.add("d-none");
+            btnTake.classList.add("d-none");
+
+            btnAssign.disabled = true;
+            stateSel.disabled = false;
+            prioSel.disabled = false;
+            if (catSel) catSel.disabled = false;
+
+            buttons.forEach(b => b.disabled = false);
+
+            enableForms();
+
+            // 🚨 Mensaje claro de bloqueo de reasignación
+            if (techLockMsg) {
+                techLockMsg.classList.remove("d-none");
+                techLockMsg.textContent =
+                    "No puedes asignar el ticket a otro técnico. Solo modificar estado, prioridad y categoría.";
+            }
+
+            return;
+        }
+
+        // ---- Ticket asignado a otro técnico ----
+        if (techMsg) techMsg.textContent = "Asignado a otro técnico.";
+
+        assignSection.classList.add("d-none");
+        btnTake.classList.add("d-none");
+
+        stateSel.disabled = true;
+        prioSel.disabled = true;
+        if (catSel) catSel.disabled = true;
+
+        buttons.forEach(b => b.disabled = true);
+
+        disableForms();
+
+        if (techLockMsg) {
+            techLockMsg.classList.remove("d-none");
+            techLockMsg.textContent =
+                "Este ticket pertenece a otro técnico. No puedes modificarlo.";
+        }
+
+        return;
+    }
+
+    // ===============================
+    //   USUARIO NORMAL
+    // ===============================
     adminP.classList.add("d-none");
-    disableForms();
-    return;
-  }
 
-  const roles = CURRENT_ROLES || [];
-  const isAdmin = roles.includes("admin");
-  const isTech = roles.includes("tecnico");
-
-  const userId = CURRENT_USER.id;
-  const assignedId = CURRENT_TICKET.assigned_to || null;
-
-  const stateSel=document.getElementById("stateSelect");
-  const prioSel=document.getElementById("prioSelect");
-
-  const btnSave=document.getElementById("btnSaveMeta");
-  const btnStart=document.getElementById("btnStart");
-  const btnResolve=document.getElementById("btnResolve");
-  const btnClose=document.getElementById("btnClose");
-  const btnReopen=document.getElementById("btnReopen");
-  const btnAssign=document.getElementById("btnAssign");
-
-  const buttons=[btnSave,btnStart,btnResolve,btnClose,btnReopen];
-
-  // ---- usuario normal ----
-  if(!isAdmin && !isTech && !SERVER_ADMIN){
-    adminP.classList.add("d-none");
-    if(CURRENT_TICKET.requester === userId){
-      enableForms();
+    if (CURRENT_TICKET.requester === userId) {
+        enableForms();
     } else {
-      disableForms();
+        disableForms();
     }
-    return;
-  }
-
-  // ---- admin ----
-  adminP.classList.remove("d-none");
-
-  if(isAdmin || SERVER_ADMIN){
-    if(techMsg) techMsg.textContent="Eres administrador: control total.";
-
-    assignSection.classList.remove("d-none");
-    btnTake.classList.add("d-none");
-
-    btnAssign.disabled=false;
-    stateSel.disabled=false;
-    prioSel.disabled=false;
-    buttons.forEach(b=>b.disabled=false);
-
-    enableForms();
-    return;
-  }
-
-  // ---- técnico ----
-  if(isTech){
-
-    // no asignado
-    if(!assignedId){
-      if(techMsg) techMsg.textContent="Ticket sin asignar. Puedes tomarlo.";
-      assignSection.classList.add("d-none");
-      btnTake.classList.remove("d-none");
-
-      stateSel.disabled=true;
-      prioSel.disabled=true;
-      buttons.forEach(b=>b.disabled=true);
-
-      disableForms();
-      return;
-    }
-
-    // asignado al técnico actual
-    if(assignedId === userId){
-      if(techMsg) techMsg.textContent="Ticket asignado a ti.";
-
-      assignSection.classList.add("d-none");
-      btnTake.classList.add("d-none");
-
-      btnAssign.disabled=true;
-      stateSel.disabled=false;
-      prioSel.disabled=false;
-      buttons.forEach(b=>b.disabled=false);
-
-      enableForms();
-      return;
-    }
-
-    // asignado a otro técnico
-    if(techMsg) techMsg.textContent="Asignado a otro técnico.";
-
-    assignSection.classList.add("d-none");
-    btnTake.classList.add("d-none");
-
-    stateSel.disabled=true;
-    prioSel.disabled=true;
-    buttons.forEach(b=>b.disabled=true);
-
-    disableForms();
-    return;
-  }
 }
+
+document.getElementById("btnEditTicket").classList.remove("d-none");
+
 
 // =====================================================
 //   TABS (carga bajo demanda)
@@ -938,6 +1226,82 @@ function initTabs(){
   document.getElementById("btnReopen").onclick =
     ()=> saveMeta("open", prioSelect.value);
 })();
+
+
+
+// =====================================================
+//   EDITAR TÍTULO / DESCRIPCIÓN
+// =====================================================
+
+function enableTicketEditMode() {
+    document.getElementById("titleView").classList.add("d-none");
+    document.getElementById("editTitle").classList.remove("d-none");
+    document.getElementById("editTitle").value = CURRENT_TICKET.title;
+
+    document.getElementById("descriptionView").classList.add("d-none");
+    document.getElementById("editDescription").classList.remove("d-none");
+    document.getElementById("editDescription").value = CURRENT_TICKET.description;
+
+    document.getElementById("btnEditTicket").classList.add("d-none");
+    document.getElementById("btnSaveTicket").classList.remove("d-none");
+}
+
+async function saveEditedTicket() {
+
+    const newTitle = document.getElementById("editTitle").value.trim();
+    const newDesc  = document.getElementById("editDescription").value.trim();
+
+    if (!newTitle) {
+        showToast("El título no puede estar vacío.", "error");
+        return;
+    }
+
+    const payload = {
+        title: newTitle,
+        description: newDesc
+    };
+
+    const r = await api(`/api/tickets/${TICKET_ID}/`, {
+        method: "PATCH",
+        body: JSON.stringify(payload)
+    });
+
+    if (!r.ok) {
+        showToast("Error al guardar los cambios.", "error");
+        return;
+    }
+
+    const data = await r.json();
+
+    // Actualizar UI
+    CURRENT_TICKET.title = data.title;
+    CURRENT_TICKET.description = data.description;
+
+    document.getElementById("titleView").textContent = data.title;
+    document.getElementById("descriptionView").textContent = data.description;
+
+    // Modo vista normal
+    document.getElementById("editTitle").classList.add("d-none");
+    document.getElementById("titleView").classList.remove("d-none");
+
+    document.getElementById("editDescription").classList.add("d-none");
+    document.getElementById("descriptionView").classList.remove("d-none");
+
+    document.getElementById("btnSaveTicket").classList.add("d-none");
+    document.getElementById("btnEditTicket").classList.remove("d-none");
+
+    showToast("Ticket actualizado correctamente", "success");
+}
+
+// Asignar eventos a los botones
+document.addEventListener("DOMContentLoaded", () => {
+    const btnEdit = document.getElementById("btnEditTicket");
+    const btnSave = document.getElementById("btnSaveTicket");
+
+    if (btnEdit) btnEdit.onclick = enableTicketEditMode;
+    if (btnSave) btnSave.onclick = saveEditedTicket;
+});
+
 </script>
 
 {% endblock %}

@@ -3,80 +3,127 @@
 
 {% block extra_head %}
 <style>
-  .glass{
+/* ================================
+      CONTENEDOR PRINCIPAL
+================================ */
+.faq-wrapper {
+    height: 78vh;                 /* Altura real del módulo */
+    display: flex;
+    flex-direction: column;
+}
+
+/* ================================
+      ÁREA DE SCROLL
+================================ */
+.faq-content {
+    flex: 1;                      /* Ocupa todo el espacio sobrante */
+    overflow-y: auto;             
+    overflow-x: hidden;           
+    padding-right: 6px;           
+    padding-bottom: 10px;         
+}
+
+/* Scrollbar Chrome */
+.faq-content::-webkit-scrollbar {
+    width: 7px;
+}
+.faq-content::-webkit-scrollbar-thumb {
+    background: rgba(0,0,0,0.25);
+    border-radius: 8px;
+}
+.faq-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(0,0,0,0.35);
+}
+
+/* Scrollbar Firefox */
+.faq-content {
+    scrollbar-color: rgba(0,0,0,0.35) transparent;
+    scrollbar-width: thin;
+}
+
+/* ================================
+      TARJETAS FAQ
+================================ */
+.glass{
     background:rgba(255,255,255,.90);
     backdrop-filter:blur(7px);
     border:1px solid rgba(15,23,42,.06);
     border-radius:1rem;
-  }
-  .faq-card:hover{
-    transform:translateY(-2px);
-    box-shadow:0 12px 28px rgba(0,0,0,.15);
-  }
-  .faq-card{
+}
+
+.faq-card{
     transition:all .25s ease;
     cursor:pointer;
-  }
-  .fade-in{
+    border-radius:1rem;
+}
+
+.faq-card:hover{
+    transform:translateY(-2px);
+    box-shadow:0 12px 28px rgba(0,0,0,.15);
+}
+
+/* ================================
+      ANIMACIÓN APARECER
+================================ */
+.fade-in{
     animation:fadeIn .4s ease;
-  }
-  @keyframes fadeIn{
+}
+@keyframes fadeIn{
     from{opacity:0; transform:translateY(6px);}
     to{opacity:1; transform:none;}
-  }
-
-  /* Animación suave de expandir */
-.faq-animate {
-  overflow: hidden;
-  transition: all .35s ease;
 }
 
-/* Estilo cuando está expandido */
-.faq-open {
-  border-color: rgba(0,0,0,.12) !important;
-  box-shadow: 0 18px 40px rgba(0,0,0,.15);
-  transform: translateY(-2px);
-}
-
-/* Texto apareciendo suavemente */
+/* ================================
+      EXPANDIR / COLAPSAR
+================================ */
 .faq-full {
-  opacity: 0;
-  max-height: 0;
-  transition: all .35s ease;
+    opacity: 0;
+    max-height: 0;
+    overflow: hidden;
+    transition: all .35s ease;
 }
 
 .faq-full.visible {
-  opacity: 1;
-  max-height: 500px; /* suficiente para textos largos */
+    opacity: 1;
+    max-height: 500px;
 }
+
 </style>
+
 {% endblock %}
 
 {% block content %}
-<div class="glass p-3 p-md-4 fade-in">
 
-  <div class="d-flex justify-content-between align-items-center mb-3">
-    <h2 class="h5 m-0 d-flex align-items-center gap-2">
-      <i class="bi bi-question-circle text-primary"></i> Preguntas Frecuentes
-    </h2>
-  </div>
+<div class="glass p-3 p-md-4 fade-in faq-wrapper">
 
-  <!-- Buscador -->
-  <div class="mb-3">
-    <input id="search" class="form-control form-control-lg" placeholder="Buscar respuesta…">
-  </div>
+    <!-- TÍTULO -->
+    <div class="mb-3">
+        <h2 class="h5 d-flex align-items-center gap-2">
+            <i class="bi bi-question-circle text-primary"></i> Preguntas Frecuentes
+        </h2>
+    </div>
 
-  <!-- Categorías -->
-  <div class="d-flex gap-2 flex-wrap mb-4" id="catContainer">
-    <button data-cat="all" class="btn btn-sm btn-outline-primary active">Todas</button>
-  </div>
+    <!-- BUSCADOR -->
+    <div class="mb-3">
+        <input id="search" class="form-control form-control-lg" placeholder="Buscar respuesta…">
+    </div>
 
-  <div id="faqContainer" class="row g-3">
-    <div class="text-center text-muted py-5">Cargando preguntas…</div>
-  </div>
+    <!-- CATEGORÍAS -->
+    <div class="d-flex gap-2 flex-wrap mb-3" id="catContainer">
+        <button data-cat="all" class="btn btn-sm btn-outline-primary active">Todas</button>
+    </div>
+
+    <!-- LISTADO CON SCROLL -->
+    <div class="faq-content">
+        <div id="faqContainer" class="row g-3">
+            <div class="text-center text-muted py-5">Cargando preguntas…</div>
+        </div>
+    </div>
 
 </div>
+
 {% endblock %}
+
 
 {% block extra_js %}
 <script>

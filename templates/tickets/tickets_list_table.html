@@ -1,188 +1,237 @@
 {% extends "tickets/base.html" %}
-{% block title %}{{ title }} · Coyahue{% endblock %}
+{% block title %}Todos los Tickets · Coyahue{% endblock %}
 
 {% block extra_head %}
 <style>
-  .glass {
-    background: rgba(255,255,255,.92);
-    backdrop-filter: blur(6px);
-    border: 1px solid rgba(15,23,42,.06);
-    border-radius: 1rem;
-    padding: 1.2rem;
+  .glass{
+    background:rgba(255,255,255,.92);
+    backdrop-filter:blur(6px);
+    border:1px solid rgba(15,23,42,.06);
+    border-radius:1rem;
+    padding:1.25rem 1.5rem;
+    box-shadow:0 6px 20px rgba(0,0,0,.05);
   }
 
-  table.table-coy {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: .9rem;
+  th {
+    cursor:pointer;
+    white-space:nowrap;
   }
 
-  table.table-coy th {
-    background: rgba(15,23,42,.05);
-    font-weight: 600;
-    padding: .6rem .5rem;
-    border-bottom: 1px solid rgba(15,23,42,.1);
+  .badge-pill{
+    border-radius:999px;
+    padding:.35rem .6rem;
+    font-size:.75rem;
   }
 
-  table.table-coy td {
-    padding: .55rem .5rem;
-    border-bottom: 1px solid rgba(15,23,42,.06);
+  .table td {
+    vertical-align: middle;
   }
 
-  table.table-coy tr:hover {
-    background: rgba(15,23,42,.04);
+  /* Scroll area idéntica al ticket_list original */
+  .scroll-area {
+    max-height: 600px;
+    overflow-y: auto;
   }
 
-  .badge-pill {
-    padding: .3rem .6rem;
-    border-radius: 999px;
-    font-size: .75rem;
+  .scroll-area::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .scroll-area::-webkit-scrollbar-thumb {
+    background: rgba(0,0,0,.2);
+    border-radius: 4px;
+  }
+
+  .scroll-area::-webkit-scrollbar-track {
+    background: rgba(0,0,0,.05);
   }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="glass">
 
-  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-    <h2 class="h5 m-0 d-flex align-items-center gap-2">
-      <i class="bi bi-table"></i> {{ title }}
-    </h2>
+<div class="glass mb-3">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <h1 class="h5 m-0 d-flex align-items-center gap-2">
+      <i class="bi bi-table"></i> Todos los Tickets
+    </h1>
 
-    <div>
-      <a href="{% url 'ticket_new' %}" class="btn btn-primary btn-sm">
-        <i class="bi bi-plus-lg"></i> Nuevo Ticket
-      </a>
-    </div>
+    <a href="{% url 'ticket_new' %}" class="btn btn-primary btn-sm btn-ticket" data-hard-nav="1">
+      <i class="bi bi-plus-lg"></i>
+      <span>Nuevo</span>
+    </a>
   </div>
+</div>
 
-  <!-- ================= FILTROS ================= -->
-  <form method="get" class="row g-2 mb-3">
+<!-- ============================
+     FILTROS AVANZADOS
+============================= -->
+<div class="glass mb-3">
+  <form method="get" action="{% url 'ticket_list_all' %}" class="row g-2 align-items-end">
 
-    <div class="col-sm-2">
-      <select name="state" class="form-select form-select-sm">
-        <option value="">Estado (todos)</option>
-        <option value="open" {% if filters.state == "open" %}selected{% endif %}>Abiertos</option>
-        <option value="in_progress" {% if filters.state == "in_progress" %}selected{% endif %}>En progreso</option>
-        <option value="resolved" {% if filters.state == "resolved" %}selected{% endif %}>Resueltos</option>
-        <option value="closed" {% if filters.state == "closed" %}selected{% endif %}>Cerrados</option>
-      </select>
-    </div>
-
-    <div class="col-sm-2">
-      <select name="priority" class="form-select form-select-sm">
-        <option value="">Prioridad (todas)</option>
-        {% for p in priorities %}
-          <option value="{{ p.id }}" {% if filters.priority == p.id|stringformat:"s" %}selected{% endif %}>{{ p.name }}</option>
-        {% endfor %}
-      </select>
-    </div>
-
-    <div class="col-sm-2">
+    <!-- Categoría -->
+    <div class="col-md-2">
+      <label class="form-label">Categoría</label>
       <select name="category" class="form-select form-select-sm">
-        <option value="">Categoría (todas)</option>
+        <option value="">Todas</option>
         {% for c in categories %}
-          <option value="{{ c.id }}" {% if filters.category == c.id|stringformat:"s" %}selected{% endif %}>{{ c.name }}</option>
+          <option value="{{ c.id }}" {% if category == c.id|stringformat:'s' %}selected{% endif %}>
+            {{ c.name }}
+          </option>
         {% endfor %}
       </select>
     </div>
 
-    <div class="col-sm-3">
-      <input type="text" name="q" value="{{ filters.q }}" placeholder="Buscar…" class="form-control form-control-sm">
+    <!-- Prioridad (ARREGLADO) -->
+    <div class="col-md-2">
+      <label class="form-label">Prioridad</label>
+      <select name="priority" class="form-select form-select-sm">
+        <option value="">Todas</option>
+        {% for p in priorities %}
+          <option value="{{ p.code }}" {% if priority == p.code %}selected{% endif %}>
+            {{ p.name }}
+          </option>
+        {% endfor %}
+      </select>
     </div>
 
-    <div class="col-sm-2">
-      <button class="btn btn-outline-secondary btn-sm w-100">
-        <i class="bi bi-funnel"></i> Filtrar
-      </button>
+    <!-- Estado -->
+    <div class="col-md-2">
+      <label class="form-label">Estado</label>
+      <select name="state" class="form-select form-select-sm">
+        <option value="">Todos</option>
+        <option value="open" {% if state == 'open' %}selected{% endif %}>Abiertos</option>
+        <option value="in_progress" {% if state == 'in_progress' %}selected{% endif %}>En progreso</option>
+        <option value="resolved" {% if state == 'resolved' %}selected{% endif %}>Resueltos</option>
+        <option value="closed" {% if state == 'closed' %}selected{% endif %}>Cerrados</option>
+      </select>
+    </div>
+
+    <!-- Asignado -->
+    <div class="col-md-2">
+      <label class="form-label">Asignado</label>
+      <select name="assignee" class="form-select form-select-sm">
+        <option value="">Todos</option>
+        {% for u in assignees %}
+          <option value="{{ u.id }}" {% if assignee == u.id|stringformat:'s' %}selected{% endif %}>
+            {{ u.username }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <!-- Fecha desde -->
+    <div class="col-md-2">
+      <label class="form-label">Desde</label>
+      <input type="date" name="from" value="{{ from }}" class="form-control form-control-sm">
+    </div>
+
+    <!-- Fecha hasta -->
+    <div class="col-md-2">
+      <label class="form-label">Hasta</label>
+      <input type="date" name="to" value="{{ to }}" class="form-control form-control-sm">
+    </div>
+
+    <!-- Search -->
+    <div class="col-md-3">
+      <label class="form-label">Buscar</label>
+      <input type="text" name="q" value="{{ q }}" class="form-control form-control-sm"
+             placeholder="Título o descripción">
+    </div>
+
+    <div class="col-md-2">
+      <button class="btn btn-outline-secondary btn-sm w-100">Aplicar filtros</button>
     </div>
 
   </form>
+</div>
 
-  <!-- ================= TABLA ================= -->
-  <div class="table-responsive">
-    <table class="table-coy">
-      <thead>
+
+<!-- ============================
+     TABLA DE TODOS LOS TICKETS
+============================= -->
+<div class="glass">
+
+  <div class="scroll-area table-responsive">
+
+    <table class="table table-hover align-middle">
+      <thead class="table-light">
         <tr>
           <th>ID</th>
           <th>Título</th>
-          <th>Estado</th>
-          <th>Prioridad</th>
           <th>Categoría</th>
-          {% if show_assignments %}
-            <th>Asignado a</th>
-          {% endif %}
+          <th>Prioridad</th>
+          <th>Estado</th>
+          <th>Asignado</th>
           <th>Creado</th>
+          <th></th>
         </tr>
       </thead>
 
       <tbody>
-        {% for t in tickets %}
-        <tr data-href="{% url 'ticket_detail' t.id %}" style="cursor:pointer">
-        <td>#{{ t.id }}</td>
 
-          <td>{{ t.title|default:"Sin título" }}</td>
+        {% for t in tickets %}
+        <tr>
+
+          <td>#{{ t.id }}</td>
+
+          <td>{{ t.title }}</td>
+
+          <td>{{ t.category.name|default:"—" }}</td>
+
+          <td>{{ t.priority.name|default:"—" }}</td>
 
           <td>
             {% if t.state == "open" %}
-                <span class="badge-pill text-bg-danger">Abierto</span>
+              <span class="badge badge-pill text-bg-danger">Abierto</span>
             {% elif t.state == "in_progress" %}
-                <span class="badge-pill text-bg-warning">En progreso</span>
+              <span class="badge badge-pill text-bg-warning">En progreso</span>
             {% elif t.state == "resolved" %}
-                <span class="badge-pill text-bg-primary">Resuelto</span>
+              <span class="badge badge-pill text-bg-primary">Resuelto</span>
             {% elif t.state == "closed" %}
-                <span class="badge-pill text-bg-success">Cerrado</span>
+              <span class="badge badge-pill text-bg-success">Cerrado</span>
             {% else %}
-                <span class="badge-pill text-bg-secondary">{{ t.state }}</span>
+              <span class="badge badge-pill text-bg-secondary">{{ t.state }}</span>
             {% endif %}
           </td>
 
-          <td>
-            {% if t.priority %}
-              {{ t.priority.name }}
-            {% else %}
-              -
-            {% endif %}
-          </td>
-
-          <td>
-            {% if t.category %}
-              {{ t.category.name }}
-            {% else %}
-              -
-            {% endif %}
-          </td>
-
-          {% if show_assignments %}
-            <td>
-              {% if t.assigned_to %}
-                {{ t.assigned_to.username }}
-              {% else %}
-                -
-              {% endif %}
-            </td>
-          {% endif %}
+          <td>{{ t.assigned_to.username|default:"—" }}</td>
 
           <td>{{ t.created_at|date:"Y-m-d H:i" }}</td>
+
+          <td>
+            <a href="{% url 'ticket_detail' t.id %}" data-hard-nav="1"
+               class="btn btn-outline-primary btn-sm">
+              Ver
+            </a>
+          </td>
         </tr>
+
         {% empty %}
         <tr>
-          <td colspan="7" class="text-center text-muted py-4">
-            No hay tickets.
+          <td colspan="8" class="text-center text-muted py-4">
+            No hay tickets que coincidan con los filtros.
           </td>
         </tr>
         {% endfor %}
+
       </tbody>
     </table>
+
   </div>
 
 </div>
 
-<script>
-document.addEventListener("click", e => {
-  const row = e.target.closest("tr[data-href]");
-  if (row) window.location = row.dataset.href;
-});
-</script>
+{% endblock %}
 
+{% block extra_js %}
+<script>
+  // Forzar navegación completa
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest('a[data-hard-nav="1"]');
+    if (!a) return;
+    e.preventDefault();
+    window.location.assign(a.getAttribute("href"));
+  });
+</script>
 {% endblock %}
