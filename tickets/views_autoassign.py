@@ -4,6 +4,11 @@ from django.http import JsonResponse
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST
 from django.contrib.auth import get_user_model
+from django.utils.timezone import now
+from datetime import timedelta
+from django.db.models import Q
+
+
 
 from tickets.models import (
     AutoAssignConfig,
@@ -44,6 +49,9 @@ def maint_autoassign_page(request):
     # Config global (singleton)
     cfg = get_autoassign_config()
 
+    # Fecha límite para tickets visibles (últimos 30 días)
+    limit_date = now() - timedelta(days=30)
+
     # Lista de técnicos
     techs_qs = (
         User.objects.filter(groups__name="tecnico")
@@ -60,10 +68,11 @@ def maint_autoassign_page(request):
     techs = []
     for t in techs_qs:
 
-        # Tickets activos del técnico
+        # Contar solo tickets activos de los últimos 30 días
         active_tickets = Ticket.objects.filter(
             assigned_to=t,
-            state__in=["open", "in_progress"]
+            state__in=["open", "in_progress"],
+            created_at__gte=limit_date
         ).count()
 
         # Nivel de carga
@@ -76,7 +85,7 @@ def maint_autoassign_page(request):
 
         # Última asignación RR para esa área
         last_rr = "-"
-        if t.profile.area:
+        if hasattr(t, "profile") and t.profile.area:
             rr = AreaRoundRobin.objects.filter(area=t.profile.area).first()
             if rr and rr.last_user:
                 last_rr = rr.last_user.username
@@ -94,10 +103,13 @@ def maint_autoassign_page(request):
             "last_rr": last_rr,
         })
 
-    # Historial de autoasignaciones
+    # Historial de autoasignaciones (últimos 30 días)
     history = (
         TicketLog.objects
-        .filter(action="autoassigned")
+        .filter(
+            action="autoassigned",
+            ticket__created_at__gte=limit_date
+        )
         .select_related("ticket")
         .order_by("-created_at")[:15]
     )

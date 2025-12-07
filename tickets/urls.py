@@ -4,9 +4,11 @@ from django.views.generic import RedirectView
 from django.contrib.auth.views import LoginView
 from rest_framework import routers
 from rest_framework_simplejwt.views import TokenRefreshView
-from . import views_autoassign
+from django.conf import settings                      # ← AGREGADO
+from django.conf.urls.static import static            # ← AGREGADO
 
-# Views
+#views
+from . import views_autoassign
 from . import views, views_users
 from .views import (
     TicketViewSet,
@@ -21,6 +23,19 @@ from .views import (
     PriorityViewSet,
     AreaViewSet,
 )
+from .views_users import (
+    users_page,
+    users_data,
+    users_save,
+)
+
+from .views_perfil import (
+    perfil_usuario,
+    perfil_actualizar_foto,
+    perfil_eliminar_foto,
+    perfil_actualizar_datos,
+)
+
 
 # ============================================================
 #   API ROUTER (DRF)
@@ -80,6 +95,10 @@ web_urlpatterns = [
     # FAQ del Usuario (vista pública del sistema)
     path("faq/", views.faq_page, name="faq"),
     path("faq/<int:pk>/unresolved/", views.faq_unresolved, name="faq_unresolved"),
+    # FAQ feedback
+    path("faqs/<int:pk>/useful/", views.faq_mark_useful, name="faq_useful"),
+    path("faqs/<int:pk>/unresolved/", views.faq_mark_unresolved, name="faq_unresolved_api"),
+
 
     # Activos
     path("assets/<slug:asset_id>/", views.asset_history_page, name="asset_history"),
@@ -156,8 +175,13 @@ web_urlpatterns = [
     path("tickets/estado/<str:state>/", views.ticket_list_state, name="ticket_list_state"),
     path("faq/<int:pk>/", views.faq_detail, name="faq_detail"),
 
-
- 
+    # --------------------------
+    # PERFIL DE USUARIO
+    # --------------------------
+    path("perfil/", perfil_usuario, name="perfil_usuario"),
+    path("perfil/foto/actualizar/", perfil_actualizar_foto, name="perfil_actualizar_foto"),
+    path("perfil/foto/eliminar/", perfil_eliminar_foto, name="perfil_eliminar_foto"),
+    path("perfil/datos/actualizar/", perfil_actualizar_datos, name="perfil_actualizar_datos"),
 
 
 
@@ -167,7 +191,7 @@ web_urlpatterns = [
     
 
     
-]
+]+ static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
 # ============================================================
 #   URL FINAL

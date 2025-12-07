@@ -102,17 +102,19 @@ def users_data(request):
         profile, _ = UserProfile.objects.get_or_create(user=u)
 
         row = {
-            "id": u.id,
-            "username": u.username or "",
-            "full_name": (u.get_full_name() or "").strip(),
-            "email": u.email or "",
-            "is_staff": bool(u.is_staff),
-            "is_active": bool(u.is_active),
-            "roles": sorted(set(roles)),
-            "area_id": profile.area_id,
-            "area_name": profile.area.name if profile.area else "",
-        }
-
+        "id": u.id,
+        "username": u.username or "",
+        "first_name": u.first_name or "",
+        "last_name": u.last_name or "",
+        "full_name": (u.get_full_name() or "").strip(),
+        "email": u.email or "",
+        "is_staff": bool(u.is_staff),
+        "is_active": bool(u.is_active),
+        "roles": sorted(set(roles)),
+        "area_id": profile.area_id,
+        "area_name": profile.area.name if profile.area else "",
+        "profile_picture": profile.profile_picture.url if profile.profile_picture else "",
+    }
         if q:
             text = " ".join([
                 row["username"].lower(),
@@ -130,7 +132,7 @@ def users_data(request):
 
 
 # ==========================================================
-#   API — CREAR / EDITAR USUARIO  (VALIDACIÓN DE ÁREA CORREGIDA)
+#   API — CREAR / EDITAR USUARIO (CON FOTO)
 # ==========================================================
 @login_required
 @require_POST
@@ -140,52 +142,83 @@ def users_save(request):
     if not _actor_can_use_user_maint(request.user):
         return JsonResponse({"ok": False, "error": "No autorizado."}, status=403)
 
-    try:
-        data = json.loads(request.body.decode("utf-8"))
-    except Exception:
-        return HttpResponseBadRequest("JSON inválido")
+    # ============================================================
+    # 1) DATOS DE FORM-DATA
+    # ============================================================
+    data = request.POST
+    files = request.FILES
 
-    uid = data.get("id")
+    # -----------------------------
+    # Normalizar UID
+    # -----------------------------
+    raw_uid = data.get("id")
+    if raw_uid in ("", "null", "None", None):
+        uid = None
+    else:
+        try:
+            uid = int(raw_uid)
+        except ValueError:
+            return JsonResponse({"ok": False, "error": "ID inválido."}, status=400)
+
     username = (data.get("username") or "").strip()
     email = (data.get("email") or "").strip()
     first_name = (data.get("first_name") or "").strip()
     last_name = (data.get("last_name") or "").strip()
-    is_staff = bool(data.get("is_staff", False))
-    is_active = bool(data.get("is_active", True))
 
-    desired_roles = [(r or "").strip().lower() for r in (data.get("roles") or []) if r]
-    desired_roles = sorted(set(desired_roles))
-
+    is_staff = data.get("is_staff") in ("true", "True", True, "1", 1)
+    is_active = data.get("is_active") in ("true", "True", True, "1", 1)
     raw_password = data.get("password")
-    area_id = data.get("area")
 
-    # ================================
-    # VALIDACIONES IMPORTANTES (BACKEND)
-    # ================================
+    # ============================================================
+    # 2) ROLES
+    # ============================================================
+    desired_roles = sorted(set(
+        r.strip().lower() for r in data.getlist("roles") if r.strip()
+    ))
+
     is_admin = "admin" in desired_roles
     is_tec = "tecnico" in desired_roles
     is_solic = "usuario" in desired_roles
 
-    # 🔥 ADMIN puede tener área o NO tenerla, NO requiere validación adicional
-    # 🔥 TÉCNICO y SOLICITANTE → DEBEN tener área obligatoria
-    if (is_tec or is_solic) and not area_id:
-        return JsonResponse({
-            "ok": False,
-            "error": "Los roles técnico y solicitante requieren un área asignada."
-        }, status=400)
+    # ============================================================
+    # 3) ÁREA — NORMALIZAR
+    # ============================================================
+    area_raw = data.get("area")
+
+    if area_raw in ("", "null", "None", None):
+        area_id = None
+    else:
+        try:
+            area_id = int(area_raw)
+        except (ValueError, TypeError):
+            return JsonResponse({"ok": False, "error": "Área inválida."}, status=400)
+
+    if area_id is not None and not Area.objects.filter(id=area_id).exists():
+        return JsonResponse({"ok": False, "error": "El área seleccionada no existe."}, status=400)
+
+    # ============================================================
+    # 4) FOTO
+    # ============================================================
+    picture_file = files.get("profile_picture")
+    remove_picture = data.get("remove_picture") == "true"
+
+    # ============================================================
+    # 5) VALIDACIONES ROLES + ÁREA
+    # ============================================================
 
     if is_admin and is_tec:
-        return JsonResponse({
-            "ok": False,
-            "error": "El rol admin NO puede coexistir con técnico."
-        }, status=400)
+        return JsonResponse({"ok": False, "error": "Admin no puede coexistir con Técnico."}, status=400)
 
-    # =========================
-    # CREAR USUARIO
-    # =========================
+    if (is_tec or is_solic) and area_id is None:
+        return JsonResponse({"ok": False, "error": "Técnico y Solicitante requieren área."}, status=400)
+
+    # ============================================================
+    # 6) CREAR USUARIO
+    # ============================================================
     if uid is None:
+
         if User.objects.filter(username=username).exists():
-            return JsonResponse({"ok": False, "error": "Username ya existe."}, status=400)
+            return JsonResponse({"ok": False, "error": "El username ya existe."}, status=400)
 
         user = User(
             username=username,
@@ -193,7 +226,7 @@ def users_save(request):
             first_name=first_name,
             last_name=last_name,
             is_staff=is_staff,
-            is_active=is_active
+            is_active=is_active,
         )
 
         if raw_password:
@@ -203,9 +236,9 @@ def users_save(request):
 
         user.save()
 
-    # =========================
-    # EDITAR USUARIO
-    # =========================
+    # ============================================================
+    # 7) EDITAR USUARIO
+    # ============================================================
     else:
         user = get_object_or_404(User, pk=uid)
 
@@ -226,38 +259,65 @@ def users_save(request):
             user.set_password(raw_password)
             user.save()
 
-    # ================================
-    # GUARDAR ÁREA EN EL PERFIL
-    # ================================
+    # ============================================================
+    # 8) PERFIL (ÁREA + FOTO)
+    # ============================================================
     profile, _ = UserProfile.objects.get_or_create(user=user)
-    profile.area_id = area_id if area_id else None
-    profile.save()
 
-    # ================================
-    # APLICAR ROLES
-    # ================================
+    profile.area_id = area_id
+
+    if picture_file:
+        profile.profile_picture = picture_file
+
+    if remove_picture:
+        profile.profile_picture = None
+
+    profile.save()  # NECESARIO para que exista .url
+
+    # recargar perfil para garantizar acceso a .url
+    profile.refresh_from_db()
+
+    # -----------------------------
+    # 5) ROLES
+    # -----------------------------
     try:
-        desired_set = assert_actor_can_manage(request.user, user, desired_roles)
-        final_roles = apply_roles(user, sorted(desired_set))
-    except LastAdminRemovalError as e:
-        return JsonResponse({"ok": False, "error": str(e)}, status=409)
-    except RolePermissionError as e:
+        allowed_set = assert_actor_can_manage(request.user, user, desired_roles)
+        final_roles = apply_roles(user, sorted(allowed_set))
+    except (LastAdminRemovalError, RolePermissionError) as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=403)
+
+    # -----------------------------
+    # 6) RESPUESTA FINAL — FIX DEL ERROR .url
+    # -----------------------------
+    # 🔥 recargar el perfil para que la imagen ya NO sea InMemoryUploadedFile
+    profile.refresh_from_db()
+
+    # obtener URL segura
+    profile_url = ""
+    if profile.profile_picture:
+        try:
+            profile_url = profile.profile_picture.url
+        except Exception:
+            profile_url = ""
 
     return JsonResponse({
         "ok": True,
         "user": {
             "id": user.id,
             "username": user.username,
-            "full_name": (user.get_full_name() or "").strip(),
+            "full_name": user.get_full_name(),
             "email": user.email or "",
             "is_staff": bool(user.is_staff),
             "is_active": bool(user.is_active),
             "roles": list(final_roles),
             "area_id": profile.area_id,
             "area_name": profile.area.name if profile.area else "",
+            "profile_picture": profile_url,
         }
     })
+
+
+
 
 
 
@@ -297,3 +357,6 @@ def users_toggle_active(request):
     user.save()
 
     return JsonResponse({"ok": True, "id": user.id, "is_active": user.is_active})
+
+
+

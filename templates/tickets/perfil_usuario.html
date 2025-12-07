@@ -1,0 +1,316 @@
+{% extends "tickets/base.html" %}
+{% load static %}
+
+{% block title %}Mi Perfil · Coyahue{% endblock %}
+
+{% block extra_head %}
+<style>
+
+/* ============================
+   ESTILO — SIMILAR A Ticket Detail
+============================ */
+
+.glass-box {
+    background: rgba(255,255,255,0.94);
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(15,23,42,0.08);
+    box-shadow: 0 2px 10px rgba(0,0,0,.06);
+    border-radius: 1rem;
+    padding: 1.5rem 1.8rem;
+}
+
+.section-title {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-bottom: .6rem;
+}
+
+.label-box {
+    background: #f8f9fa;
+    border: 1px solid rgba(15,23,42,.06);
+    padding: .55rem .7rem;
+    border-radius: .45rem;
+    font-size: .9rem;
+}
+
+.btn-sm {
+    padding: .25rem .55rem;
+    font-size: .82rem;
+}
+
+.input-small {
+    font-size: .9rem;
+    padding: .45rem .6rem;
+}
+
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="glass-box fade-in mx-auto" style="max-width:650px;">
+
+    <h2 class="h5 mb-3 d-flex align-items-center gap-2">
+        <i class="bi bi-person-circle"></i>
+        Mi Perfil
+    </h2>
+
+    <!-- FOTO -->
+    <div class="text-center mb-4">
+
+        {% if request.user.profile.profile_picture %}
+            <img src="{{ request.user.profile.profile_picture.url }}"
+                 id="avatarImg"
+                 class="rounded-circle border shadow-sm"
+                 style="width:140px;height:140px;object-fit:cover;">
+        {% else %}
+            <img src="{% static 'img/default-avatar.png' %}"
+                 id="avatarImg"
+                 class="rounded-circle border shadow-sm"
+                 style="width:140px;height:140px;object-fit:cover;">
+        {% endif %}
+
+        <div class="mt-3 d-flex justify-content-center gap-2 flex-wrap">
+
+            <!-- Botón cambiar foto -->
+            <button class="btn btn-primary btn-sm btn-ripple"
+                    data-bs-toggle="modal"
+                    data-bs-target="#modalFoto">
+                <i class="bi bi-camera-fill me-1"></i> Cambiar foto
+            </button>
+
+            <!-- Botón eliminar foto -->
+            {% if request.user.profile.profile_picture %}
+            <button class="btn btn-outline-danger btn-sm btn-ripple"
+                    id="btnRemovePhoto">
+                <i class="bi bi-x-circle me-1"></i> Quitar foto
+            </button>
+            {% endif %}
+        </div>
+
+    </div>
+
+    <hr class="my-4">
+
+    <!-- INFORMACIÓN BÁSICA -->
+    <h6 class="section-title"><i class="bi bi-info-circle me-1"></i> Información del usuario</h6>
+
+    <form id="formDatos" class="row g-3">
+
+        <div class="col-md-6">
+            <label class="form-label small fw-semibold">Nombre</label>
+            <input type="text" id="firstName" class="form-control input-small"
+                   value="{{ request.user.first_name }}">
+        </div>
+
+        <div class="col-md-6">
+            <label class="form-label small fw-semibold">Apellido</label>
+            <input type="text" id="lastName" class="form-control input-small"
+                   value="{{ request.user.last_name }}">
+        </div>
+
+        <div class="col-md-12">
+            <button class="btn btn-outline-primary btn-sm mt-2" id="btnSaveDatos">
+                <i class="bi bi-save me-1"></i> Guardar cambios
+            </button>
+        </div>
+
+    </form>
+
+</div>
+
+<!-- ==========================================================
+     MODAL — CAMBIAR FOTO
+========================================================== -->
+<div class="modal fade" id="modalFoto" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content glass-box">
+
+      <form id="formFoto" enctype="multipart/form-data">
+        <div class="modal-header">
+          <h5 class="modal-title">Cambiar foto de perfil</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+
+        <div class="modal-body">
+
+          <label class="form-label">Subir nueva imagen</label>
+          <input type="file" name="profile_picture"
+                 class="form-control"
+                 accept="image/*"
+                 required>
+
+          <p class="small text-muted mt-2">
+            Tamaño recomendado: 1:1 (cuadrado).  
+            La imagen se ajustará automáticamente.
+          </p>
+
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary btn-sm">Actualizar foto</button>
+        </div>
+
+      </form>
+
+    </div>
+  </div>
+</div>
+
+
+<!-- ==========================================================
+     JS — SUBIR / ELIMINAR FOTO + EDITAR DATOS
+========================================================== -->
+<script>
+/* ============================================================
+      OBTENER CSRF TOKEN PARA TODOS LOS POST
+============================================================ */
+function getCSRFToken() {
+    const cookie = document.cookie
+        .split("; ")
+        .find(row => row.startsWith("csrftoken="));
+    return cookie ? cookie.split("=")[1] : "";
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+
+    const avatarImg = document.getElementById("avatarImg");
+    const formFoto = document.getElementById("formFoto");
+    const fileInput = document.querySelector("#formFoto input[type='file']");
+    const btnRemovePhoto = document.getElementById("btnRemovePhoto");
+
+    const firstName = document.getElementById("firstName");
+    const lastName = document.getElementById("lastName");
+    const btnSaveDatos = document.getElementById("btnSaveDatos");
+
+    /* ============================================================
+         PREVISUALIZAR FOTO ANTES DE SUBIR (UX mejorada)
+    ============================================================ */
+    if (fileInput) {
+        fileInput.addEventListener("change", () => {
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            // Mostrar vista previa sin subir aún
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                avatarImg.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+
+    /* ============================================================
+         ACTUALIZAR NOMBRE Y APELLIDO
+    ============================================================ */
+btnSaveDatos.addEventListener("click", async (e) => {
+    e.preventDefault();
+
+    const fd = new FormData();
+    fd.append("first_name", firstName.value.trim());
+    fd.append("last_name", lastName.value.trim());
+
+    const r = await fetch("{% url 'perfil_actualizar_datos' %}", {
+        method: "POST",
+        body: fd,
+        credentials: "include",
+        headers: { "X-CSRFToken": getCSRFToken() }
+    });
+
+    const data = await r.json();
+
+    if (data.ok) {
+
+        alert("Datos actualizados correctamente.");
+
+        // Actualizar inputs con lo que responde el backend
+        firstName.value = data.first_name;
+        lastName.value = data.last_name;
+
+        // Actualizar nombre en navbar sin recargar
+        const nameEl = document.getElementById("navbarUserName");
+        if (nameEl) {
+            const newName = data.first_name || "{{ request.user.username }}";
+            nameEl.innerText = newName;
+        }
+
+    } else {
+        alert(data.error || "Error guardando datos.");
+    }
+});
+
+
+    /* ============================================================
+         SUBIR NUEVA FOTO
+    ============================================================ */
+    formFoto.addEventListener("submit", async (e) => {
+        e.preventDefault();
+
+        const fd = new FormData(formFoto);
+
+        const r = await fetch("{% url 'perfil_actualizar_foto' %}", {
+            method: "POST",
+            body: fd,
+            credentials: "include",
+            headers: { "X-CSRFToken": getCSRFToken() }
+        });
+
+        const data = await r.json();
+
+        if (data.ok) {
+            // Refrescar avatar
+            avatarImg.src = data.url + "?v=" + Date.now();
+
+            // Actualizar foto en navbar
+            const navAvatar = document.getElementById("navbarUserAvatar");
+            if (navAvatar) {
+                navAvatar.src = data.url + "?v=" + Date.now();
+            }
+
+            bootstrap.Modal.getInstance(
+                document.getElementById("modalFoto")
+            ).hide();
+
+        } else {
+            alert(data.error || "Error al subir la foto.");
+        }
+    });
+
+
+    /* ============================================================
+         ELIMINAR FOTO
+    ============================================================ */
+    if (btnRemovePhoto) {
+        btnRemovePhoto.addEventListener("click", async () => {
+
+            if (!confirm("¿Eliminar la foto de perfil?")) return;
+
+            const r = await fetch("{% url 'perfil_eliminar_foto' %}", {
+                method: "POST",
+                credentials: "include",
+                headers: { "X-CSRFToken": getCSRFToken() }
+            });
+
+            const data = await r.json();
+
+            if (data.ok) {
+                const defUrl = "{% static 'img/default-avatar.png' %}";
+
+                avatarImg.src = defUrl;
+
+                const navAvatar = document.getElementById("navbarUserAvatar");
+                if (navAvatar) navAvatar.src = defUrl;
+
+            } else {
+                alert(data.error || "Error eliminando foto.");
+            }
+        });
+    }
+
+});
+</script>
+
+
+
+{% endblock %}

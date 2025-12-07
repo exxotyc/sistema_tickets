@@ -94,6 +94,10 @@
 
 {% block content %}
 
+<div class="position-fixed top-0 end-0 p-3" style="z-index: 9999;">
+    <div id="toastContainer"></div>
+</div>
+
 <div class="glass p-3 p-md-4 fade-in faq-wrapper">
 
     <!-- TÍTULO -->
@@ -130,112 +134,126 @@
 // ======================================================
 // Manejo de tokens y helper API
 // ======================================================
+
 async function ensureAccessToken() {
-  // Devuelve token válido o null
-  let access = localStorage.getItem("access_token");
-  if (access) return access;
+    let access = localStorage.getItem("access_token");
+    if (access) return access;
 
-  const refresh = localStorage.getItem("refresh_token");
-  if (refresh) {
-    try {
-      const rr = await fetch("/api/token/refresh/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh })
-      });
-      if (rr.ok) {
-        const d = await rr.json();
-        localStorage.setItem("access_token", d.access);
-        return d.access;
-      }
-    } catch (e) { /* ignore */ }
-  }
+    const refresh = localStorage.getItem("refresh_token");
 
-  // ============================
-  // FIX: Solicitar token de sesión con CSRF
-  // ============================
-  try {
-    const csrftoken = getCookie("csrftoken");
+    if (refresh) {
+        try {
+            const rr = await fetch("/api/token/refresh/", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ refresh }),
+                credentials: "include"
+            });
 
-    const rs = await fetch("/api/token/session/", {
-      method: "POST",
-      headers: {
-        "X-CSRFToken": csrftoken
-      }
-    });
-
-    if (rs.ok) {
-      const ds = await rs.json();
-      if (ds.access) localStorage.setItem("access_token", ds.access);
-      if (ds.refresh) localStorage.setItem("refresh_token", ds.refresh);
-      return ds.access || null;
+            if (rr.ok) {
+                const data = await rr.json();
+                localStorage.setItem("access_token", data.access);
+                return data.access;
+            }
+        } catch (err) { console.error("Error en refresh:", err); }
     }
-  } catch (e) {
-    console.error("No se pudo obtener token de sesión", e);
-  }
 
-  return null;
+    try {
+        const csrftoken = getCookie("csrftoken");
+        const rs = await fetch("/api/token/session/", {
+            method: "POST",
+            headers: { "X-CSRFToken": csrftoken },
+            credentials: "include"
+        });
+
+        if (rs.ok) {
+            const data = await rs.json();
+
+            if (data.access) localStorage.setItem("access_token", data.access);
+            if (data.refresh) localStorage.setItem("refresh_token", data.refresh);
+
+            return data.access || null;
+        }
+    } catch (err) {
+        console.error("No se pudo obtener token de sesión:", err);
+    }
+
+    return null;
 }
 
-// Helper:
-function getCookie(name){
-    const m=document.cookie.match('(^|;)\\s*'+name+'\\s*=\\s*([^;]+)');
+function getCookie(name) {
+    const m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
     return m ? m.pop() : "";
 }
 
 async function tryRefreshAndRetry(originalRequest) {
-  const refresh = localStorage.getItem("refresh_token");
-  if (!refresh) return null;
-  try {
-    const rr = await fetch("/api/token/refresh/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh })
-    });
-    if (!rr.ok) return null;
-    const d = await rr.json();
-    localStorage.setItem("access_token", d.access);
-    // re-intentar la petición original con nuevo token
-    const headers = {
-      ...(originalRequest.headers || {}),
-      Authorization: "Bearer " + d.access
-    };
-    return fetch(originalRequest.url, { ...originalRequest.opts, headers });
-  } catch (e) {
-    console.error("Refresh failed", e);
-    return null;
-  }
+    const refresh = localStorage.getItem("refresh_token");
+    if (!refresh) return null;
+
+    try {
+        const rr = await fetch("/api/token/refresh/", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ refresh }),
+            credentials: "include"
+        });
+
+        if (!rr.ok) return null;
+
+        const data = await rr.json();
+        localStorage.setItem("access_token", data.access);
+
+        const headers = {
+            ...(originalRequest.headers || {}),
+            Authorization: "Bearer " + data.access
+        };
+
+        return fetch(originalRequest.url, {
+            ...originalRequest.opts,
+            headers,
+            credentials: "include"
+        });
+
+    } catch (err) {
+        console.error("Error al refrescar token:", err);
+        return null;
+    }
 }
 
-// apiFetch: asegura token y reintenta 1 vez en 401
 async function apiFetch(url, opts = {}) {
-  const full = url.startsWith("/api") ? url : "/api" + url;
+    const full = url.startsWith("/api") ? url : "/api" + url;
 
-  // asegurar token
-  const token = await ensureAccessToken();
-  const headers = {
-    ...(opts.headers || {}),
-    ...(token ? { Authorization: "Bearer " + token } : {})
-  };
+    const token = await ensureAccessToken();
+    const csrftoken = getCookie("csrftoken");
 
-  let res;
-  try {
-    res = await fetch(full, { ...opts, headers });
-  } catch (e) {
-    throw e;
-  }
+    const headers = {
+        "X-CSRFToken": csrftoken,
+        "Content-Type": "application/json",
+        ...(opts.headers || {}),
+        ...(token ? { Authorization: "Bearer " + token } : {})
+    };
 
-  if (res.status === 401) {
-    // intentar refrescar y reintentar una vez
-    const retried = await tryRefreshAndRetry({ url: full, opts });
-    if (retried) return retried;
-  }
+    let res;
+    try {
+        res = await fetch(full, { ...opts, headers, credentials: "include" });
+    } catch (err) {
+        console.error("Error en fetch:", err);
+        throw err;
+    }
 
-  return res;
+    if (res.status === 401) {
+        const retry = await tryRefreshAndRetry({
+            url: full,
+            opts: { ...opts, headers, credentials: "include" }
+        });
+        if (retry) return retry;
+    }
+
+    return res;
 }
 
 // ======================================================
-// Utilidades de UI
+// Utilidades
 // ======================================================
 function esc(s){
   return String(s||"").replace(/[&<>"']/g, m => ({
@@ -244,31 +262,60 @@ function esc(s){
 }
 
 // ======================================================
+// Mostrar toast
+// ======================================================
+function showToast(message, type="success") {
+    // Tipos: success, danger, info, warning
+    const colors = {
+        success: "bg-success text-white",
+        danger: "bg-danger text-white",
+        info: "bg-info text-white",
+        warning: "bg-warning text-dark"
+    };
+
+    const toast = document.createElement("div");
+    toast.className = `toast align-items-center ${colors[type]} border-0`;
+    toast.role = "alert";
+    toast.innerHTML = `
+        <div class="d-flex">
+            <div class="toast-body">${message}</div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>
+    `;
+
+    document.getElementById("toastContainer").appendChild(toast);
+
+    // Bootstrap inicia el toast
+    const bsToast = new bootstrap.Toast(toast, { delay: 2500 });
+    bsToast.show();
+
+    // eliminar tras desaparecer
+    toast.addEventListener("hidden.bs.toast", () => toast.remove());
+}
+
+// ======================================================
 // Cargar categorías
 // ======================================================
 async function loadCategories(){
-  try{
-    const r = await apiFetch("/api/categories/");
-    if(!r.ok){
-      // si no autorizado o no hay datos, mostrar botón "Todas" y fallar silencioso
-      console.warn("Categorias: status", r.status);
-      return;
-    }
+    try{
+        const r = await apiFetch("/api/categories/");
+        if(!r.ok){
+            console.warn("Categorias: status", r.status);
+            return;
+        }
 
-    const cats = await r.json();
-    const container = document.getElementById("catContainer");
+        const cats = await r.json();
+        const container = document.getElementById("catContainer");
 
-    (cats.results || cats).forEach(c=>{
-      const btn = document.createElement("button");
-      btn.className = "btn btn-sm btn-outline-primary";
-      btn.textContent = c.name;
-      btn.dataset.cat = c.id;
-      container.appendChild(btn);
-    });
+        (cats.results || cats).forEach(c=>{
+            const btn = document.createElement("button");
+            btn.className = "btn btn-sm btn-outline-primary";
+            btn.textContent = c.name;
+            btn.dataset.cat = c.id;
+            container.appendChild(btn);
+        });
 
-  }catch(err){
-    console.error("Error cargando categorías", err);
-  }
+    }catch(err){ console.error("Error cargando categorías", err); }
 }
 
 // ======================================================
@@ -277,193 +324,203 @@ async function loadCategories(){
 let ALL_FAQ = [];
 
 async function loadFAQ(){
-  try{
-    const r = await apiFetch("/api/faqs/");
-    if(!r.ok){
-      console.warn("FAQs: status", r.status);
-      const cont = document.getElementById("faqContainer");
-      cont.innerHTML = '<div class="text-center text-muted py-5">No se pudieron cargar preguntas</div>';
-      return;
+    try{
+        const r = await apiFetch("/api/faqs/");
+        if(!r.ok){
+            document.getElementById("faqContainer").innerHTML =
+                '<div class="text-center text-muted py-5">No se pudieron cargar preguntas</div>';
+            return;
+        }
+
+        const data = await r.json();
+        ALL_FAQ = data.results || data;
+        renderFAQ(ALL_FAQ);
+
+    }catch(err){
+        document.getElementById("faqContainer").innerHTML =
+            '<div class="text-center text-muted py-5">Error cargando preguntas</div>';
     }
-
-    const data = await r.json();
-    ALL_FAQ = data.results || data;
-    renderFAQ(ALL_FAQ);
-
-  }catch(err){
-    console.error("Error cargando FAQs", err);
-    const cont = document.getElementById("faqContainer");
-    cont.innerHTML = '<div class="text-center text-muted py-5">Error cargando preguntas</div>';
-  }
 }
 
 // ======================================================
 // Render FAQ
 // ======================================================
 function renderFAQ(list){
-  const cont = document.getElementById("faqContainer");
+    const cont = document.getElementById("faqContainer");
 
-  if(!list.length){
-    cont.innerHTML = '<div class="text-center text-muted py-5">Sin resultados</div>';
-    return;
-  }
+    if(!list.length){
+        cont.innerHTML = '<div class="text-center text-muted py-5">Sin resultados</div>';
+        return;
+    }
 
-  cont.innerHTML = "";
+    cont.innerHTML = "";
 
-  list.forEach(f => {
-    const div = document.createElement("div");
-    div.className = "col-md-6";
+    list.forEach(f => {
+        const div = document.createElement("div");
+        div.className = "col-md-6";
 
-    const fullText = esc(f.answer || "");
-    const shortText = fullText.slice(0,120);
+        // Si ya votó → deshabilitar botones
+        const disabled = f.has_voted ? "disabled" : "";
 
-    div.innerHTML = `
-      <div class="faq-card glass faq-animate p-3" data-faq-id="${f.id}">
+        // Colores según voto
+        const votedUseful = f.user_vote === "useful" ? "btn-success text-white" : "";
+        const votedNo = f.user_vote === "unresolved" ? "btn-danger text-white" : "";
 
-        <h6 class="mb-2 faq-title" style="cursor:pointer">
-          ${esc(f.question)}
-        </h6>
+        const fullText = esc(f.answer || "");
+        const shortText = fullText.slice(0,120);
 
-        <p class="text-muted small mb-2 faq-short">
-          ${esc(shortText)}...
-          <span class="text-primary">ver más</span>
-        </p>
+        div.innerHTML = `
+        <div class="faq-card glass faq-animate p-3" data-faq-id="${f.id}">
 
-        <p class="text-muted small mb-2 faq-full">
-          ${fullText}
-          <br><span class="text-primary">ver menos</span>
-        </p>
+            <h6 class="mb-2 faq-title" style="cursor:pointer">${esc(f.question)}</h6>
 
-        <span class="badge text-bg-light">${esc(f.category_name || "General")}</span>
+            <p class="text-muted small mb-2 faq-short">
+                ${esc(shortText)}... <span class="text-primary">ver más</span>
+            </p>
 
-        <div class="d-flex gap-2 mt-3">
-          <button class="btn btn-outline-success btn-sm" data-yes="${f.id}">
-            <i class="bi bi-hand-thumbs-up"></i> Útil
-          </button>
-          <button class="btn btn-outline-danger btn-sm" data-no="${f.id}">
-            <i class="bi bi-hand-thumbs-down"></i> No útil
-          </button>
+            <p class="text-muted small mb-2 faq-full">
+                ${fullText}<br><span class="text-primary">ver menos</span>
+            </p>
+
+            <span class="badge text-bg-light">${esc(f.category_name || "General")}</span>
+
+            <div class="d-flex gap-2 mt-3">
+                <button class="btn btn-sm ${votedUseful || "btn-outline-success"}" 
+                        data-yes="${f.id}" ${disabled}>
+                    <i class="bi bi-hand-thumbs-up"></i> Útil
+                </button>
+
+                <button class="btn btn-sm ${votedNo || "btn-outline-danger"}"
+                        data-no="${f.id}" ${disabled}>
+                    <i class="bi bi-hand-thumbs-down"></i> No útil
+                </button>
+            </div>
         </div>
+        `;
 
-      </div>
-    `;
+        cont.appendChild(div);
+    });
 
-    cont.appendChild(div);
-  });
+    // Expansión animada
+    document.querySelectorAll(".faq-card").forEach(card => {
+        const shortEl = card.querySelector(".faq-short");
+        const fullEl  = card.querySelector(".faq-full");
 
-  // ===============================
-  // EXPANSIÓN ANIMADA
-  // ===============================
-  document.querySelectorAll(".faq-card").forEach(card => {
-    const shortEl = card.querySelector(".faq-short");
-    const fullEl  = card.querySelector(".faq-full");
-    
-    const toggle = () => {
-      const open = card.classList.contains("faq-open");
+        const toggle = () => {
+            if (card.classList.contains("faq-open")) {
+                card.classList.remove("faq-open");
+                fullEl.classList.remove("visible");
+                shortEl.style.display = "";
+            } else {
+                card.classList.add("faq-open");
+                shortEl.style.display = "none";
+                fullEl.classList.add("visible");
+            }
+        };
 
-      if (open) {
-        // cerrar
-        card.classList.remove("faq-open");
-        fullEl.classList.remove("visible");
-        shortEl.style.display = "";
-      } else {
-        // abrir
-        card.classList.add("faq-open");
-        shortEl.style.display = "none";
-        fullEl.classList.add("visible");
-      }
-    };
-
-    card.querySelector(".faq-title").onclick = toggle;
-    shortEl.onclick = toggle;
-    fullEl.onclick = toggle;
-  });
+        card.querySelector(".faq-title").onclick = toggle;
+        shortEl.onclick = toggle;
+        fullEl.onclick = toggle;
+    });
 }
-
-
 
 // ======================================================
 // Filtro por categoría
 // ======================================================
 document.getElementById("catContainer").onclick = e => {
-  const btn = e.target.closest("button");
-  if(!btn) return;
+    const btn = e.target.closest("button");
+    if(!btn) return;
 
-  [...document.querySelectorAll("#catContainer button")].forEach(b=>b.classList.remove("active"));
-  btn.classList.add("active");
+    [...document.querySelectorAll("#catContainer button")].forEach(b=>b.classList.remove("active"));
+    btn.classList.add("active");
 
-  const cat = btn.dataset.cat;
+    const cat = btn.dataset.cat;
 
-  if(cat === "all"){
-    renderFAQ(ALL_FAQ);
-  } else {
-    renderFAQ( ALL_FAQ.filter(f => Number(f.category) === Number(cat)) );
-  }
+    if(cat === "all") renderFAQ(ALL_FAQ);
+    else renderFAQ(ALL_FAQ.filter(f => Number(f.category) === Number(cat)));
 };
 
 // ======================================================
 // Buscador
 // ======================================================
 document.getElementById("search").oninput = e => {
-  const q = e.target.value.toLowerCase();
+    const q = e.target.value.toLowerCase();
 
-  const filtered = ALL_FAQ.filter(f =>
-    (f.question || "").toLowerCase().includes(q) ||
-    (f.answer || "").toLowerCase().includes(q)
-  );
+    const filtered = ALL_FAQ.filter(f =>
+        (f.question || "").toLowerCase().includes(q) ||
+        (f.answer || "").toLowerCase().includes(q)
+    );
 
-  renderFAQ(filtered);
+    renderFAQ(filtered);
 };
 
 // ======================================================
 // Feedback (Útil / No útil)
 // ======================================================
 document.getElementById("faqContainer").onclick = async e => {
-  const yesBtn = e.target.closest("button[data-yes]");
-  const noBtn  = e.target.closest("button[data-no]");
+    const yesBtn = e.target.closest("button[data-yes]");
+    const noBtn  = e.target.closest("button[data-no]");
 
-  try{
-    // 👍 Útil
-    if (yesBtn) {
-      const id = yesBtn.dataset.yes;
+    try{
+        // 👍 Útil
+        if (yesBtn) {
+            const id = yesBtn.dataset.yes;
 
-      const r = await apiFetch(`/api/faqs/${id}/useful/`, { method: "POST" });
-      if (!r.ok) throw new Error("feedback failed");
+            const r = await apiFetch(`/api/faqs/${id}/useful/`, { method: "POST" });
+            if (!r.ok) throw new Error("feedback failed");
 
-      alert("¡Gracias! Esta información fue útil.");
-      return;
+            showToast("¡Gracias! Esta información fue útil.", "success");
+
+            yesBtn.classList.add("btn-success","text-white");
+            yesBtn.classList.remove("btn-outline-success");
+            yesBtn.disabled = true;
+
+            const noButton = yesBtn.closest(".d-flex").querySelector("[data-no]");
+            noButton.disabled = true;
+
+            return;
+        }
+
+        // 👎 No útil
+        if (noBtn) {
+            const id = noBtn.dataset.no;
+
+            const r = await apiFetch(`/api/faqs/${id}/unresolved/`, { method: "POST" });
+            if (!r.ok) throw new Error("feedback failed");
+
+            const faq = ALL_FAQ.find(f => String(f.id) === String(id));
+            const q = faq ? faq.question : "";
+
+            showToast("Crearemos un ticket para ayudarte.", "danger");
+
+            noBtn.classList.add("btn-danger","text-white");
+            noBtn.classList.remove("btn-outline-danger");
+            noBtn.disabled = true;
+
+            const yesButton = noBtn.closest(".d-flex").querySelector("[data-yes]");
+            yesButton.disabled = true;
+
+            location.href = `/tickets/new/?fromfaq=${encodeURIComponent(q)}`;
+            return;
+        }
+
+    } catch(err){
+        console.error("Error enviando feedback", err);
+        alert("Ocurrió un error al registrar tu respuesta.");
     }
-
-    // 👎 No útil
-    if (noBtn) {
-      const id = noBtn.dataset.no;
-
-      const r = await apiFetch(`/api/faqs/${id}/unresolved/`, { method: "POST" });
-      if (!r.ok) throw new Error("feedback failed");
-
-      const faq = ALL_FAQ.find(f => String(f.id) === String(id));
-      const q = faq ? faq.question : "";
-
-      alert("Gracias, te ayudaremos creando un ticket.");
-      location.href = `/tickets/new/?fromfaq=${encodeURIComponent(q)}`;
-      return;
-    }
-
-  }catch(err){
-    console.error("Error enviando feedback", err);
-    alert("Ocurrió un error al registrar tu respuesta.");
-  }
 };
 
 // ======================================================
-// INIT
+// INIT FINAL
 // ======================================================
-(function(){
-  // iniciar flujo token en background (para reducir 401s iniciales)
-  ensureAccessToken().catch(()=>{ /* ignorable */ });
+(async function(){
+    console.log(">> INIT: esperando token...");
+    await ensureAccessToken();
 
-  loadCategories();
-  loadFAQ();
+    console.log(">> token OK, cargando UI...");
+    await loadCategories();
+    await loadFAQ();
 })();
 </script>
+
 {% endblock %}

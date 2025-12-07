@@ -8,6 +8,30 @@
   .table-hover tbody tr:hover{background:#f8fafc}
   .fade-in{animation:fadeIn .4s ease}
   @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  
+  .table-scroll-wrapper {
+    max-height: 500px;
+    overflow-y: auto;
+    border: 1px solid rgba(15,23,42,.06);
+    border-radius: 0.5rem;
+  }
+  .table-scroll-wrapper::-webkit-scrollbar {
+    width: 8px;
+  }
+  .table-scroll-wrapper::-webkit-scrollbar-track {
+    background: rgba(15,23,42,.04);
+  }
+  .table-scroll-wrapper::-webkit-scrollbar-thumb {
+    background: rgba(15,23,42,.2);
+    border-radius: 4px;
+  }
+  .table-scroll-wrapper::-webkit-scrollbar-thumb:hover {
+    background: rgba(15,23,42,.4);
+  }
+  .table-scroll-wrapper {
+    scrollbar-color: rgba(15,23,42,.2) rgba(15,23,42,.04);
+    scrollbar-width: thin;
+  }
 </style>
 {% endblock %}
 
@@ -23,7 +47,9 @@
       <button id="btnReload" class="btn btn-outline-secondary btn-sm btn-ripple">
         <i class="bi bi-arrow-clockwise me-1"></i>Recargar
       </button>
-      <a class="btn btn-outline-secondary btn-sm btn-ripple" href="{% url 'maint_index' %}">Volver</a>
+      <a class="btn btn-outline-secondary btn-sm btn-ripple" href="{% url 'maint_index' %}">
+        Volver
+      </a>
     </div>
   </div>
 
@@ -34,20 +60,20 @@
 
   <div id="globalMsg" class="alert d-none" role="alert"></div>
 
-  <div class="table-responsive">
+  <div class="table-scroll-wrapper table-responsive">
     <table class="table table-hover align-middle">
-      <thead class="table-light">
-      <tr>
-        <th style="width:80px">ID</th>
-        <th>Usuario</th>
-        <th>Nombre</th>
-        <th>Correo</th>
-        <th>Área</th>
-        <th style="width:110px">Activo</th>
-        <th style="width:110px">Staff</th>
-        <th style="width:260px">Roles</th>
-        <th class="text-end" style="width:160px">Acciones</th>
-      </tr>
+      <thead class="table-light" style="position: sticky; top: 0;">
+        <tr>
+          <th style="width:80px">ID</th>
+          <th>Usuario</th>
+          <th>Nombre</th>
+          <th>Correo</th>
+          <th>Área</th>
+          <th style="width:110px">Activo</th>
+          <th style="width:110px">Staff</th>
+          <th style="width:260px">Roles</th>
+          <th class="text-end" style="width:160px">Acciones</th>
+        </tr>
       </thead>
       <tbody id="rows">
         <tr><td colspan="9" class="text-center text-muted py-4">Cargando…</td></tr>
@@ -56,24 +82,25 @@
   </div>
 
   <div class="alert alert-info mt-3">
-    Recuerda: <strong>admin</strong> y <strong>técnico</strong> no pueden coexistir.  
-    Técnicos y solicitantes <strong>DEBEN</strong> tener área.  
+    Recuerda: <strong>admin</strong> y <strong>técnico</strong> no pueden coexistir.<br>
+    Técnicos y solicitantes <strong>DEBEN</strong> tener área.<br>
     Admin puede tener área o dejarla vacía.
   </div>
 </div>
 
-<!-- CONTEXTO RBAC -->
+<!-- RBAC context -->
 <div id="rbacInfo"
      data-allowed='{{ allowed_roles_json|safe }}'
      data-role-options='{{ role_options_json|safe }}'
      data-can-staff='{{ can_manage_staff|yesno:"true,false" }}'
      hidden></div>
 
-<!-- MODAL -->
+<!-- ========== MODAL ========== -->
 <div class="modal fade" id="userModal" tabindex="-1">
   <div class="modal-dialog modal-lg modal-dialog-centered">
     <div class="modal-content">
-      <form id="userForm">
+
+      <form id="userForm" enctype="multipart/form-data">
         <div class="modal-header">
           <h5 class="modal-title" id="modalTitle">Nuevo usuario</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -83,6 +110,23 @@
           <div id="formAlert" class="alert alert-danger d-none small"></div>
 
           <div class="row g-3">
+
+            <!-- FOTO SOLO AL CREAR USUARIO -->
+            <div class="col-md-12 d-none" id="photoCreateBlock">
+              <label class="form-label">Foto de perfil (opcional)</label>
+
+              <input type="file" id="f_picture" class="form-control" accept="image/*">
+
+              <img id="preview_picture"
+                   class="rounded-circle mt-2 border d-none"
+                   style="width:80px;height:80px;object-fit:cover;">
+
+              <button type="button"
+                      id="btnRemovePic"
+                      class="btn btn-outline-danger btn-sm mt-2 d-none">
+                  <i class="bi bi-x-circle"></i> Quitar foto
+              </button>
+            </div>
 
             <div class="col-md-6">
               <label class="form-label">Usuario</label>
@@ -104,7 +148,7 @@
               <input id="f_last_name" type="text" class="form-control">
             </div>
 
-            <!-- Contraseña + ver -->
+            <!-- Contraseña -->
             <div class="col-md-6">
               <label class="form-label">Contraseña</label>
               <div class="input-group">
@@ -116,12 +160,12 @@
               <div class="form-text">Deja en blanco para mantener la actual.</div>
             </div>
 
-            <!-- Confirmar contraseña -->
             <div class="col-md-6">
               <label class="form-label">Confirmar contraseña</label>
               <input id="f_password2" type="password" class="form-control" autocomplete="new-password">
             </div>
 
+            <!-- Estado -->
             <div class="col-md-6">
               <div class="form-check form-switch mt-4">
                 <input class="form-check-input" type="checkbox" id="f_active" checked>
@@ -136,6 +180,7 @@
               {% endif %}
             </div>
 
+            <!-- Área -->
             <div class="col-md-6">
               <label class="form-label">Área</label>
               <select id="f_area" class="form-select">
@@ -144,13 +189,15 @@
               <div class="form-text">Obligatoria para técnicos y solicitantes.</div>
             </div>
 
-            <div class="col-md-6">
+            <!-- Roles -->
+            <div class="col-md-12">
               <label class="form-label">Roles</label>
               <div id="roleChecks" class="d-flex flex-wrap gap-3"></div>
             </div>
 
-          </div>
-        </div>
+          </div> <!-- row g-3 -->
+        </div> <!-- modal-body -->
+
 
         <div class="modal-footer">
           <button type="button" class="btn btn-outline-secondary btn-ripple" data-bs-dismiss="modal">Cancelar</button>
@@ -158,6 +205,7 @@
         </div>
 
       </form>
+
     </div>
   </div>
 </div>
@@ -168,15 +216,37 @@
 <script>
 console.log("[maint_usuarios] script cargado");
 
+
+async function refreshToken() {
+    const refresh = localStorage.getItem("refresh_token");
+    if (!refresh) return null;
+
+    const r = await fetch("/api/token/refresh/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh })
+    });
+
+    if (!r.ok) return null;
+
+    const data = await r.json();
+    if (data.access) {
+        localStorage.setItem("access_token", data.access);
+        return data.access;
+    }
+    return null;
+}
+
+
 /* ============================================================
    API FETCH GLOBAL (JWT + CSRF)
 ============================================================ */
-async function apiFetch(url, options = {}){
+async function apiFetch(url, options = {}) {
     options.headers = options.headers || {};
     options.credentials = "include";
 
-    const token = localStorage.getItem("access_token");
-    if (token){
+    let token = localStorage.getItem("access_token");
+    if (token) {
         options.headers["Authorization"] = "Bearer " + token;
     }
 
@@ -185,15 +255,25 @@ async function apiFetch(url, options = {}){
         .find(r => r.startsWith("csrftoken="))
         ?.split("=")[1];
 
-    const method = (options.method || "GET").toUpperCase();
-    if (csrf && ["POST","PUT","PATCH","DELETE"].includes(method)) {
+    if (csrf) {
         options.headers["X-CSRFToken"] = csrf;
-        if (!options.headers["Content-Type"]) {
-            options.headers["Content-Type"] = "application/json";
+    }
+
+    let r = await fetch(url, options);
+
+    // Si expira el token → intentar refresh
+    if (r.status === 401) {
+        console.warn("[apiFetch] Token expirado → refrescando…");
+
+        const newTok = await refreshToken();
+        if (newTok) {
+            // repetir request con token nuevo
+            options.headers["Authorization"] = "Bearer " + newTok;
+            r = await fetch(url, options);
         }
     }
 
-    return fetch(url, options);
+    return r;
 }
 
 /* ============================================================
@@ -227,6 +307,10 @@ async function apiFetch(url, options = {}){
   const f_staff      = document.getElementById("f_staff");
   const f_area       = document.getElementById("f_area");
   const roleChecks   = document.getElementById("roleChecks");
+
+  const f_picture       = document.getElementById("f_picture");
+  const preview_picture = document.getElementById("preview_picture");
+  const btnRemovePic    = document.getElementById("btnRemovePic");
 
   const infoEl       = document.getElementById("rbacInfo");
   const allowedRoles = JSON.parse(infoEl.dataset.allowed || "[]");
@@ -274,77 +358,101 @@ async function apiFetch(url, options = {}){
     });
   }
 
-/* ============================================================
-   CARGAR ÁREAS (versión estable + retry)
-============================================================ */
-async function loadAreas(){
-
-  // 1) Esperar a que el token exista (máx 3 segundos)
-  let tries = 0;
-  while (!localStorage.getItem("access_token") && tries < 60){
-      await new Promise(r => setTimeout(r, 50));
-      tries++;
-  }
-
-  async function fetchAreas(){
-      const r = await apiFetch("/api/areas/");
-      if(r.status === 401){
-          console.warn("[loadAreas] 401 → intentando refresh…");
-          const newToken = await refreshToken?.(); // por si está definida globalmente
-          if(newToken){
-              return await apiFetch("/api/areas/");
-          }
-      }
-      return r;
-  }
-
-  try{
-    const r = await fetchAreas();
-
-    if (!r.ok){
-      console.error("Error cargando áreas:", r.status);
-      f_area.innerHTML = '<option value="">(Error cargando áreas)</option>';
+  /* ============================================================
+      PREVIEW DE FOTO + remover
+  ============================================================ */
+  f_picture.onchange = () => {
+    const file = f_picture.files[0];
+    if (!file){
+      preview_picture.classList.add("d-none");
+      btnRemovePic.classList.add("d-none");
       return;
     }
+    preview_picture.src = URL.createObjectURL(file);
+    preview_picture.classList.remove("d-none");
+    btnRemovePic.classList.remove("d-none");
+  };
 
-    const data = await r.json();
-    areaList = data;
+  btnRemovePic.onclick = () => {
+    f_picture.value = "";
+    preview_picture.src = "";
+    preview_picture.classList.add("d-none");
+    btnRemovePic.classList.add("d-none");
+    btnRemovePic.classList.add("to-remove");
+  };
 
-    f_area.innerHTML = '<option value="">(Sin área asignada)</option>';
+  /* ============================================================
+      CARGAR ÁREAS
+  ============================================================ */
+  async function loadAreas() {
 
-    data.forEach(a=>{
-      const opt = document.createElement("option");
-      opt.value = a.id;
-      opt.textContent = a.name;
-      f_area.appendChild(opt);
-    });
+    // ========================
+    // ESPERAR TOKEN (máx 3 seg)
+    // ========================
+    let attempts = 0;
+    while (!localStorage.getItem("access_token") && attempts < 60) {
+        await new Promise(r => setTimeout(r, 50));
+        attempts++;
+    }
 
-    console.log("[loadAreas] Áreas cargadas correctamente:", data.length);
+    async function fetchAreas() {
+        const r = await apiFetch("/api/areas/");
+        if (r.status === 401) {
+            console.warn("[loadAreas] 401 → intentando refresh…");
+            const newToken = await refreshToken?.();
+            if (newToken) {
+                return await apiFetch("/api/areas/");
+            }
+        }
+        return r;
+    }
 
-  }catch(err){
-    console.error("loadAreas error", err);
-    f_area.innerHTML = '<option value="">(Error cargando áreas)</option>';
-  }
+    try {
+        const r = await fetchAreas();
+
+        if (!r.ok) {
+            console.error("Error cargando áreas:", r.status);
+            f_area.innerHTML = '<option value="">(Error cargando áreas)</option>';
+            return;
+        }
+
+        const data = await r.json();
+        areaList = data;
+
+        f_area.innerHTML = '<option value="">(Sin área asignada)</option>';
+
+        data.forEach(a => {
+            const opt = document.createElement("option");
+            opt.value = a.id;
+            opt.textContent = a.name;
+            f_area.appendChild(opt);
+        });
+
+        console.log("[loadAreas] Áreas cargadas correctamente:", data.length);
+
+    } catch (err) {
+        console.error("loadAreas error", err);
+        f_area.innerHTML = '<option value="">(Error cargando áreas)</option>';
+    }
 }
+
 
   /* ============================================================
       CARGAR USUARIOS
   ============================================================ */
   async function loadUsers(){
     rows.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">Cargando…</td></tr>';
-
     try{
       const r = await apiFetch("/mantenedor/usuarios/data/");
-      if (!r.ok){
-        rows.innerHTML = '<tr><td colspan="9" class="text-center text-danger py-4">Error cargando usuarios.</td></tr>';
+      if(!r.ok){
+        rows.innerHTML = '<tr><td colspan="9" class="text-center text-danger py-4">Error</td></tr>';
         return;
       }
       const data = await r.json();
       allUsers = data.users || [];
       render(allUsers);
-    }catch(err){
-      console.error("loadUsers error", err);
-      rows.innerHTML = '<tr><td colspan="9" class="text-center text-danger py-4">Error cargando usuarios.</td></tr>';
+    }catch(e){
+      console.error(e);
     }
   }
 
@@ -352,59 +460,33 @@ async function loadAreas(){
       RENDER TABLA
   ============================================================ */
   function render(list){
-    if(!list || !list.length){
+    if(!list.length){
       rows.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">Sin usuarios</td></tr>';
       return;
     }
-
     rows.innerHTML = "";
-
     list.forEach(u=>{
-      const full      = u.full_name || "";
-      const rolesHtml = (u.roles || [])
-        .map(r=> `<span class="badge text-bg-light me-1 tag">${r}</span>`)
-        .join("");
-
       const tr = document.createElement("tr");
       tr.dataset.id = u.id;
-
-      if (!u.is_active){
-        tr.classList.add("table-danger", "text-muted");
-      }
-
-      const toggleBtnHtml = u.is_active
-        ? `<button class="btn btn-outline-danger btn-sm" data-action="deactivate">
-             <i class="bi bi-trash"></i>
-           </button>`
-        : `<button class="btn btn-outline-success btn-sm" data-action="reactivate">
-             <i class="bi bi-arrow-counterclockwise"></i>
-           </button>`;
 
       tr.innerHTML = `
         <td>${u.id}</td>
         <td><strong>${u.username}</strong></td>
-        <td>${full || "—"}</td>
+        <td>${u.full_name || "—"}</td>
         <td>${u.email || "—"}</td>
         <td>${u.area_name || "—"}</td>
-        <td>
-          ${u.is_active
-            ? '<span class="badge text-bg-success">Sí</span>'
-            : '<span class="badge text-bg-danger">No</span>'}
-        </td>
-        <td>
-          ${u.is_staff
-            ? '<span class="badge text-bg-primary">Sí</span>'
-            : '<span class="badge text-bg-secondary">No</span>'}
-        </td>
-        <td>${rolesHtml || "—"}</td>
+        <td>${u.is_active ? '<span class="badge text-bg-success">Sí</span>' : '<span class="badge text-bg-danger">No</span>'}</td>
+        <td>${u.is_staff ? '<span class="badge text-bg-primary">Sí</span>' : '<span class="badge text-bg-secondary">No</span>'}</td>
+        <td>${(u.roles||[]).map(r=>`<span class="badge text-bg-light">${r}</span>`).join("")}</td>
         <td class="text-end">
-          <button class="btn btn-outline-primary btn-sm me-1" data-action="edit">
+          <button class="btn btn-outline-primary btn-sm me-1" data-edit="${u.id}">
             <i class="bi bi-pencil"></i>
           </button>
-          ${toggleBtnHtml}
+          <button class="btn btn-outline-${u.is_active ? "danger" : "success"} btn-sm" data-toggle="${u.id}">
+            <i class="bi bi-${u.is_active ? "trash" : "arrow-counterclockwise"}"></i>
+          </button>
         </td>
       `;
-
       rows.appendChild(tr);
     });
   }
@@ -412,261 +494,181 @@ async function loadAreas(){
   /* ============================================================
       FILTRO
   ============================================================ */
-  q.addEventListener("input", ()=>{
+  q.oninput = ()=>{
     const t = q.value.toLowerCase();
-    const filtered = allUsers.filter(u =>
+    render(allUsers.filter(u =>
       u.username.toLowerCase().includes(t) ||
       (u.email||"").toLowerCase().includes(t) ||
-      (u.full_name||"").toLowerCase().includes(t) ||
-      (u.area_name||"").toLowerCase().includes(t)
-    );
-    render(filtered);
-  });
+      (u.full_name||"").toLowerCase().includes(t)
+    ));
+  };
 
   /* ============================================================
-      CLICK EN EL LISTADO (EDIT / DESACTIVAR / REACTIVAR)
+      NUEVO USUARIO
   ============================================================ */
-  rows.addEventListener("click", async ev=>{
-    const btn = ev.target.closest("button[data-action]");
-    if(!btn) return;
-
-    const id = btn.closest("tr").dataset.id;
-    const user = allUsers.find(u=>u.id==id);
-    if(!user) return;
-
-    if(btn.dataset.action === "edit"){
-      openModal("edit", user);
-    }
-    else if(btn.dataset.action === "deactivate" || btn.dataset.action === "reactivate"){
-      const willActivate = btn.dataset.action === "reactivate";
-      const actionText = willActivate ? "reactivar" : "desactivar";
-
-      if(!confirm(`¿Seguro que deseas ${actionText} al usuario "${user.username}"?`)){
-        return;
-      }
-
-      try{
-        const r = await apiFetch("/mantenedor/usuarios/toggle/", {
-          method: "POST",
-          body: JSON.stringify({
-            id: user.id,
-            active: willActivate
-          })
-        });
-
-        const data = await r.json().catch(()=>({ok:false,error:"Error desconocido"}));
-        if(!data.ok){
-          setGlobalMsg(data.error || "No se pudo cambiar el estado del usuario.", false);
-          return;
-        }
-
-        setGlobalMsg(`Usuario ${actionText} correctamente.`, true);
-        await loadUsers();
-      }catch(err){
-        console.error("toggle error", err);
-        setGlobalMsg("Error de red al cambiar el estado del usuario.", false);
-      }
-    }
-  });
-
-  /* ============================================================
-      CLICK NUEVO / RECARGAR
-  ============================================================ */
-  btnNew.addEventListener("click", ()=>{
-    openModal("create", null);
-  });
-
-  if (btnReload){
-    btnReload.addEventListener("click", ()=>{
-      loadUsers();
-    });
-  }
-
-  /* ============================================================
-      ABRIR MODAL
-  ============================================================ */
-  function openModal(mode, user){
+btnNew.onclick = () => {
+    currentId = null;
     form.reset();
     hideFormError();
-    currentId = null;
-    f_password.value = "";
-    if(f_password2) f_password2.value = "";
 
-    if(mode === "edit" && user){
-      modalTitle.textContent = "Editar usuario";
-      currentId = user.id;
+    // Mostrar bloque de foto
+    document.getElementById("photoCreateBlock").classList.remove("d-none");
 
-      f_username.value = user.username;
-      f_email.value    = user.email;
+    // Reset preview
+    preview_picture.classList.add("d-none");
+    btnRemovePic.classList.add("d-none");
+    btnRemovePic.classList.remove("to-remove");
 
-      const parts = (user.full_name||"").trim().split(" ");
-      f_first_name.value = parts[0] || "";
-      f_last_name.value  = parts.slice(1).join(" ");
+    modalTitle.textContent = "Nuevo usuario";
+    modal.show();
+};
 
-      f_active.checked = !!user.is_active;
-      if(f_staff) f_staff.checked = !!user.is_staff;
 
-      f_area.value = user.area_id || "";
-      buildRoleInputs(user.roles || []);
-    }
-    else {
-      modalTitle.textContent = "Nuevo usuario";
-      f_active.checked = true;
-      if(f_staff) f_staff.checked = false;
-      f_area.value = "";
-      buildRoleInputs([]);
+  /* ============================================================
+      EDITAR USUARIO
+  ============================================================ */
+  rows.onclick = (ev)=>{
+    const btn = ev.target.closest("button[data-edit]");
+    if(!btn) return;
+
+    const id = Number(btn.dataset.edit);
+    const u = allUsers.find(x=>x.id===id);
+    if(!u) return;
+
+    currentId = u.id;
+    form.reset();
+    hideFormError();
+
+    modalTitle.textContent = "Editar usuario";
+
+    f_username.value = u.username;
+    f_email.value    = u.email;
+    f_first_name.value = u.first_name || "";
+    f_last_name.value  = u.last_name || "";
+    f_active.checked = !!u.is_active;
+    if (f_staff) f_staff.checked = !!u.is_staff;
+
+    f_area.value = u.area_id ? String(u.area_id) : "";
+
+
+    buildRoleInputs(u.roles || []);
+
+    // cargar foto existente
+    if (u.profile_picture){
+        preview_picture.src = u.profile_picture;
+        preview_picture.classList.remove("d-none");
+        btnRemovePic.classList.remove("d-none");
+    } else {
+        preview_picture.classList.add("d-none");
+        btnRemovePic.classList.add("d-none");
     }
 
     modal.show();
-  }
+  };
 
   /* ============================================================
-      ROLES UI
+      ARMAR CHECKBOX DE ROLES
   ============================================================ */
   function buildRoleInputs(selected){
     roleChecks.innerHTML = "";
-    const sel = new Set(selected || []);
+    const sel = new Set(selected);
 
-    roleOptions.forEach(opt=>{
+    roleOptions.forEach(r=>{
       const wrap = document.createElement("div");
       wrap.className = "form-check";
 
       const input = document.createElement("input");
       input.type = "checkbox";
       input.className = "form-check-input";
-      input.id = "role_"+opt.code;
-      input.value = opt.code;
-      input.checked = sel.has(opt.code);
+      input.id = "role_"+r.code;
+      input.value = r.code;
+      input.checked = sel.has(r.code);
 
       const label = document.createElement("label");
       label.className = "form-check-label";
       label.setAttribute("for", input.id);
-      label.textContent = opt.label;
+      label.textContent = r.label;
 
       wrap.appendChild(input);
       wrap.appendChild(label);
       roleChecks.appendChild(wrap);
     });
-  }
+}
+
 
   /* ============================================================
-      GUARDAR
+      GUARDAR / CREAR / EDITAR
   ============================================================ */
-  form.addEventListener("submit", async e=>{
+  form.onsubmit = async e => {
     e.preventDefault();
     hideFormError();
 
     const username = f_username.value.trim();
-    const email    = (f_email.value || "").trim().toLowerCase();
+    if(!username) return showFormError("Nombre de usuario requerido.");
 
-    if(!username){
-      return showFormError("El nombre de usuario es obligatorio.");
-    }
-
-    // Validación de duplicados (username)
-    const dupUser = allUsers.find(u =>
-      u.username.toLowerCase() === username.toLowerCase() &&
-      u.id !== currentId
-    );
-    if(dupUser){
-      return showFormError("Ya existe un usuario con ese nombre de usuario.");
-    }
-
-    // Validación de duplicados (email)
-    if(email){
-      const dupEmail = allUsers.find(u =>
-        (u.email || "").toLowerCase() === email &&
-        u.id !== currentId
-      );
-      if(dupEmail){
-        return showFormError("Ya existe un usuario con ese correo electrónico.");
-      }
-    }
-
-    // Validación de contraseña + confirmación
     const pwd  = f_password.value.trim();
-    const pwd2 = f_password2 ? f_password2.value.trim() : "";
-
+    const pwd2 = f_password2.value.trim();
     if(pwd && pwd !== pwd2){
       return showFormError("Las contraseñas no coinciden.");
     }
 
-    const roles = Array.from(
-      roleChecks.querySelectorAll("input:checked")
-    ).map(i=>i.value);
-
-    const isAdmin = roles.includes("admin");
-    const isTec   = roles.includes("tecnico");
-    const isSolic = roles.includes("usuario");
-
-    // 🔥 VALIDACIONES DE ROLES + ÁREA
-    if(isAdmin && isTec){
-      return showFormError("El rol admin NO puede coexistir con técnico.");
-    }
-
-    if(!isAdmin && (isTec || isSolic) && !f_area.value){
-      return showFormError("Técnicos y solicitantes deben tener un área asignada.");
-    }
+    const roles = Array.from(roleChecks.querySelectorAll("input:checked")).map(x=>x.value);
 
     const payload = {
-      id:         currentId,
-      username:   username,
-      email:      email,
-      first_name: f_first_name.value.trim(),
-      last_name:  f_last_name.value.trim(),
-      is_active:  f_active.checked,
-      roles:      roles,
-      area:       f_area.value ? Number(f_area.value) : null
-    };
+    id: currentId,
+    username,
+    email: f_email.value.trim(),
+    first_name: f_first_name.value.trim(),
+    last_name: f_last_name.value.trim(),
+    is_active: f_active.checked,
+    roles,
+    area: f_area.value ? f_area.value : null,
+    is_staff: f_staff?.checked || false
+  };
+      if(pwd) payload.password = pwd;
 
-    if(f_staff){
-      payload.is_staff = f_staff.checked;
+    const fd = new FormData();
+    for(const [k,v] of Object.entries(payload)){
+      fd.append(k, v);
     }
 
-    if(pwd){
-      payload.password = pwd;
+    if(f_picture.files.length){
+      fd.append("profile_picture", f_picture.files[0]);
+    }
+
+    if(btnRemovePic.classList.contains("to-remove")){
+      fd.append("remove_picture", "true");
     }
 
     saveBtn.disabled = true;
 
-    try{
-      const r = await apiFetch("/mantenedor/usuarios/save/", {
-        method:"POST",
-        body: JSON.stringify(payload)
-      });
+    const r = await apiFetch("/mantenedor/usuarios/save/", {
+      method: "POST",
+      body: fd
+    });
 
-      const data = await r.json().catch(()=>({ok:false,error:"Error desconocido"}));
-      saveBtn.disabled = false;
+    saveBtn.disabled = false;
 
-      if(!data.ok){
-        return showFormError(data.error || "Error guardando usuario.");
-      }
-
-      modal.hide();
-      setGlobalMsg("Usuario guardado correctamente.", true);
-      await loadUsers();
-    }catch(err){
-      console.error("save error", err);
-      saveBtn.disabled = false;
-      showFormError("Error de red al guardar el usuario.");
+    const data = await r.json().catch(()=>({ok:false,error:"Error"}));
+    if(!data.ok){
+      return showFormError(data.error || "Error guardando usuario.");
     }
-  });
+
+    modal.hide();
+    setGlobalMsg("Usuario guardado correctamente");
+    loadUsers();
+  };
 
   /* ============================================================
       INIT
   ============================================================ */
   (async ()=>{
-    const stats = await apiFetch("/api/stats/");
-    if(!stats.ok){
-        console.error("Token inválido o expirado");
-        return;
-    }
-
     await loadAreas();
     await loadUsers();
   })();
 
 })();
 </script>
+
 
 {% endblock %}

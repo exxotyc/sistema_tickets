@@ -1,22 +1,79 @@
 {% extends "tickets/base.html" %}
 {% block title %}Mantenedor · Coyahue{% endblock %}
+
+{% block extra_head %}
+<style>
+    .glass {
+        background: rgba(255,255,255,0.92);
+        backdrop-filter: blur(6px);
+        border: 1px solid rgba(15,23,42,0.06);
+        border-radius: 1rem;
+        padding: 1.5rem;
+        box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+    }
+
+    .maint-item {
+        transition: all .18s ease;
+        border: 1px solid rgba(0,0,0,0.05);
+        padding: 1rem 1.2rem;
+        border-radius: .8rem;
+        background: #fff;
+        font-size: .95rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .maint-item:hover {
+        transform: translateY(-2px);
+        background: #f8f9fa;
+        border-color: rgba(0,0,0,0.15);
+    }
+
+    .maint-icon {
+        font-size: 1.25rem;
+        color: #0d6efd;
+    }
+
+    .maint-arrow {
+        font-size: 1rem;
+        color: #6c757d;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="card">
-  <div class="card-body">
-    <h5 class="mb-3">Mantenedor</h5>
+<div class="glass">
+
+    <h1 class="h5 mb-3 d-flex align-items-center gap-2">
+        <i class="bi bi-gear-wide-connected text-primary"></i>
+        Mantenedor del Sistema
+    </h1>
+
+    <p class="text-muted mb-4" style="font-size:.9rem;">
+        Administra usuarios, roles, áreas, prioridades, FAQ y auto-asignación.
+    </p>
+
     {% if maint_sections %}
-      <div class="row g-3">
+    <div class="row g-3">
+
         {% for s in maint_sections %}
-          <div class="col-sm-6 col-lg-4">
-            <a class="btn btn-light w-100 text-start" href="{% url 'maint_section' s.code %}">
-              <i class="bi bi-folder-gear me-1"></i> {{ s.name }}
+        <div class="col-sm-6 col-lg-4">
+            <a href="{% url 'maint_section' s.code %}" class="text-decoration-none">
+                <div class="maint-item">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="bi bi-folder-gear maint-icon"></i>
+                        <span>{{ s.name }}</span>
+                    </div>
+                    <i class="bi bi-chevron-right maint-arrow"></i>
+                </div>
             </a>
-          </div>
+        </div>
         {% endfor %}
-      </div>
+
+    </div>
     {% else %}
-      <p class="text-muted m-0">No tienes secciones asignadas.</p>
+        <p class="text-muted m-0">No tienes secciones asignadas.</p>
     {% endif %}
-  </div>
 </div>
 {% endblock %}

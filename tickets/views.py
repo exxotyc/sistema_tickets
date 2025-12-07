@@ -195,7 +195,7 @@ class AreaViewSet(viewsets.ModelViewSet):
 
 # tickets/views.py
 
-class FAQViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
+class FAQViewSet(viewsets.ModelViewSet):
     queryset = FAQ.objects.filter(is_active=True).select_related("category").order_by("question")
     serializer_class = FAQSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
@@ -206,41 +206,61 @@ class FAQViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     # ========================================
     #   Registrar voto "Útil"
     # ========================================
-    @action(detail=True, methods=["post"], permission_classes=[permissions.AllowAny])
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
     def useful(self, request, pk=None):
         faq = self.get_object()
-        user = request.user if request.user.is_authenticated else None
+        user = request.user
 
-        fb = FAQFeedback.objects.create(
+        fb, created = FAQFeedback.objects.get_or_create(
             faq=faq,
             user=user,
-            is_useful=True,
-            resolved=True,
-            comment="",
+            defaults={
+                "is_useful": True,
+                "comment": "",
+                "resolved": True  # opcional, si aplica a tu modelo
+            }
         )
+
+        if not created:
+            fb.is_useful = True
+            fb.comment = ""
+            fb.resolved = True  # mantener coherencia
+            fb.save()
 
         return Response({"status": "ok", "feedback_id": fb.id})
 
     # ========================================
     #   Registrar voto "No útil"
     # ========================================
-    @action(detail=True, methods=["post"], permission_classes=[permissions.AllowAny])
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
     def unresolved(self, request, pk=None):
         faq = self.get_object()
-        comment = (request.data.get("comment") or "").strip()
-        user = request.user if request.user.is_authenticated else None
+        user = request.user
 
-        fb = FAQFeedback.objects.create(
+        fb, created = FAQFeedback.objects.get_or_create(
             faq=faq,
             user=user,
-            is_useful=False,
-            resolved=False,
-            comment=comment,
+            defaults={
+                "is_useful": False,
+                "resolved": False,
+                "comment": ""
+            }
         )
+
+        if not created:
+            fb.is_useful = False
+            fb.resolved = False
+            fb.comment = ""
+            fb.save()
 
         return Response({"status": "ok", "feedback_id": fb.id})
 
 
+
+
+# ================================
+#   TICKET VIEWSET CORREGIDO
+# ================================
 # ================================
 #   TICKET VIEWSET CORREGIDO
 # ================================
@@ -299,6 +319,43 @@ class TicketViewSet(viewsets.ModelViewSet):
             requester=user,
             area=area,
         )
+    
+
+    # ------------------------------------------------------
+    # ASIGNAR TICKET A UN TÉCNICO
+    # URL: POST /api/tickets/<id>/assign/
+    # ------------------------------------------------------
+    @action(detail=True, methods=["post"], url_path="assign")
+    def assign_ticket(self, request, pk=None):
+        user = request.user
+
+        # Solo admin y técnico pueden asignar tickets
+        if not user.groups.filter(name__in=["admin", "tecnico"]).exists():
+            return Response({"detail": "No autorizado."}, status=403)
+
+        ticket = self.get_object()
+        tech_id = request.data.get("assigned_to")
+
+        if not tech_id:
+            return Response({"detail": "Debe enviar 'assigned_to'."}, status=400)
+
+        try:
+            tech = User.objects.get(id=tech_id, groups__name="tecnico")
+        except User.DoesNotExist:
+            return Response({"detail": "Técnico no válido."}, status=400)
+
+        ticket.assigned_to = tech
+        ticket.save()
+
+        # Log opcional
+        TicketLog.objects.create(
+            ticket=ticket,
+            user=user,
+            action="assigned",
+            meta_json={"assigned_to": tech.username}
+        )
+
+        return Response({"ok": True, "msg": "Ticket asignado correctamente."})
 
     # ------------------------------------------------------
     # UPDATE / PARTIAL UPDATE
@@ -315,21 +372,25 @@ class TicketViewSet(viewsets.ModelViewSet):
         # 1) SOLICITANTE → SOLO title/description
         # ==========================================
         if user == ticket.requester and not (is_admin or is_tech):
+
             allowed_fields = {"title", "description"}
 
             for field, value in request.data.items():
-        # Ignorar campos vacíos o nulos del PATCH
+
+                # Ignorar datos vacíos (PATCH estándar)
                 if value in [None, "", [], {}, "null"]:
                     continue
-        
-        # Bloquear solo si realmente intentó modificar otro campo
-            if field not in allowed_fields:
-                return Response(
-                    {"detail": f"No autorizado para modificar '{field}'."},
-                    status=403
-            )
 
+                # Si intenta modificar un campo que NO está permitido → bloquear
+                if field not in allowed_fields:
+                    return Response(
+                        {"detail": f"No autorizado para modificar '{field}'."},
+                        status=403
+                    )
+
+            # Si todo es válido → permitir PATCH normal
             return super().partial_update(request, *args, **kwargs)
+
         # ==========================================
         # 2) ADMIN → puede editar TODO
         # ==========================================
@@ -337,7 +398,7 @@ class TicketViewSet(viewsets.ModelViewSet):
             return super().partial_update(request, *args, **kwargs)
 
         # ==========================================
-        # 3) TÉCNICO → debe estar asignado al ticket
+        # 3) TÉCNICO → solo si está asignado
         # ==========================================
         if is_tech:
             if ticket.assigned_to != user:
@@ -348,9 +409,10 @@ class TicketViewSet(viewsets.ModelViewSet):
             return super().partial_update(request, *args, **kwargs)
 
         # ==========================================
-        # Otros casos → denegar
+        # Otros casos → no autorizado
         # ==========================================
         return Response({"detail": "No autorizado."}, status=403)
+
 
     # ------------------------------------------------------
     # ACTUALIZAR TICKET (para admin/técnico)
@@ -761,21 +823,24 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.response import Response
 
 @api_view(["POST"])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])  # ← Permitido entrar con sesión Django
 def session_token(request):
     """
-    Genera un par de tokens JWT usando EXACTAMENTE la misma
-    lógica interna que SimpleJWT.
+    Genera tokens JWT solo si el usuario tiene una sesión Django válida.
     """
-
     user = request.user
+
+    # Si NO tiene sesión Django → no hay token
+    if not user or not user.is_authenticated:
+        return Response({"error": "No autenticado"}, status=401)
+
+    # Crear tokens JWT para este usuario
     refresh = RefreshToken.for_user(user)
 
-    return JsonResponse({
+    return Response({
         "access": str(refresh.access_token),
-        "refresh": str(refresh)
+        "refresh": str(refresh),
     })
-
 # ========== Vistas HTML ====================
 
 @login_required
@@ -867,7 +932,7 @@ def dashboard(request):
 
     # --- Base queryset (visibilidad según rol)
     if user.groups.filter(name="admin").exists():
-        base_qs = Ticket.objects.all()
+        base_qs = Ticket.objects.todos()
     elif user.groups.filter(name="tecnico").exists():
         base_qs = Ticket.objects.filter(assigned_to=user)
     else:
@@ -1011,14 +1076,14 @@ def ticket_list(request):
     categories = Category.objects.all().order_by("name")
     priorities = Priority.objects.all().order_by("sla_minutes")
 
-    # CORRECCIÓN IMPORTANTE: admins también pueden aparecer como "asignables"
+    # Admins + técnicos como asignables
     assignees = User.objects.filter(
         Q(groups__name="tecnico") | Q(groups__name="admin")
     ).order_by("username")
 
     return render(
         request,
-        "tickets/tickets_list.html",
+        "tickets/ticket_list.html",
         {
             "tickets": tickets,
             "tickets_count": len(tickets),
@@ -1037,8 +1102,14 @@ def ticket_list(request):
             "priorities": priorities,
             "assignees": assignees,
 
-            # CORRECCIÓN FINAL: enviar "mine"
+            # Mis tickets
             "mine": mine,
+
+            # Flags para el template
+            "from_reports": False,      # listado normal
+            "compact_filters": False,   # 👈 filtros completos
+            "state_filter": None,
+            "priority_filter": None,
         },
     )
 
@@ -1220,34 +1291,21 @@ def logout_view(request):
 # ============================================================
 @login_required
 def maint_index(request):
-    """
-    Página principal del mantenedor.
-    Solo usuarios con rol admin (estricto) o permiso directo.
-    """
-    # Solo admin estricto (superuser, is_staff, grupo admin)
-    if not (_is_admin_strict(request.user) or request.user.has_perm("tickets.access_maint")):
-        return HttpResponseForbidden("No autorizado")
 
-    sections = Section.objects.filter(is_active=True).order_by("title")
+    if not request.user.groups.filter(name="admin").exists():
+        return render(request, "tickets/403.html", status=403)
 
-    allowed = []
-    for s in sections:
-        if _is_admin_strict(request.user) or s.groups.filter(
-            id__in=request.user.groups.values_list("id", flat=True)
-        ).exists():
-            allowed.append(s)
+    # Obtiene las secciones EXACTAMENTE igual que el navbar
+    maint_sections = _navbar_sections(request.user)
 
-    return _render(
+    return render(
         request,
         "tickets/maint_index.html",
         {
-            "sections": allowed,
-            "maint_sections": [
-                {"code": s.code, "name": s.title, "title": s.title}
-                for s in allowed
-            ],
+            "maint_sections": maint_sections
         }
     )
+
 
 
 @login_required
@@ -1574,6 +1632,11 @@ def apply_ticket_filters(qs, request):
 
 
 
+from django.db.models import Q
+from django.utils.timezone import now
+from datetime import timedelta
+
+
 def _reports_base_queryset(request):
     """
     QS base para los reportes HTML, respetando visibilidad y filtros.
@@ -1582,28 +1645,52 @@ def _reports_base_queryset(request):
     """
     qs = Ticket.objects.select_related("category", "assigned_to", "requester")
 
+    # ======================================================
+    # 🔥 NUEVO — Filtrar tickets de los últimos 30 días
+    # ======================================================
+    limit_date = now() - timedelta(days=30)
+    qs = qs.filter(created_at__gte=limit_date)
+
+    # ======================================================
     # Visibilidad según rol (igual que otros endpoints)
+    # ======================================================
     if not _is_admin_or_tech(request.user):
         qs = qs.filter(Q(requester=request.user) | Q(assigned_to=request.user))
 
+    # ======================================================
     # Filtros comunes (from/to, category, assignee, priority, asset)
+    # ======================================================
     qs = apply_ticket_filters(qs, request)
 
+    # ======================================================
     # Filtro de estado (state)
+    # ======================================================
     state = (request.GET.get("state") or "").strip()
     if state:
         qs = qs.filter(state=state)
 
+    # ======================================================
     # Búsqueda por texto en título / descripción
+    # ======================================================
     q = (request.GET.get("q") or "").strip()
     if q:
-        qs = qs.filter(Q(title__icontains=q) | Q(description__icontains=q))
+        qs = qs.filter(
+            Q(title__icontains=q) |
+            Q(description__icontains=q)
+        )
 
     return qs
 
+
+
 # --- ENDPOINT: /api/metrics/summary ---
 def _visible_qs(u):
-    return Ticket.objects.all() if _is_admin_or_tech(u) else Ticket.objects.filter(Q(requester=u)|Q(assigned_to=u))
+    return (
+        Ticket.objects.all()
+        if _is_admin_or_tech(u)
+        else Ticket.objects.filter(Q(requester=u) | Q(assigned_to=u))
+    )
+
 
 FILTER_QUERY_PARAMS = [
     openapi.Parameter(
@@ -2070,6 +2157,51 @@ def faq_unresolved(request, pk: int):
     return redirect(target)
 
 
+
+# --- ENDPOINT: /api/faq/{pk}/mark_useful ---
+@api_view(["POST"])
+def faq_mark_useful(request, pk):
+    faq = get_object_or_404(FAQ, pk=pk)
+    user = request.user
+
+    fb, created = FAQFeedback.objects.get_or_create(
+        faq=faq,
+        user=user,
+        defaults={"is_useful": True}
+    )
+
+    if not created:
+        fb.is_useful = True
+        fb.save()
+
+    return Response({"ok": True})
+
+@api_view(["POST"])
+def faq_mark_unresolved(request, pk):
+    faq = get_object_or_404(FAQ, pk=pk)
+    user = request.user
+
+    fb, created = FAQFeedback.objects.get_or_create(
+        faq=faq,
+        user=user,
+        defaults={"resolved": False, "is_useful": False}
+    )
+
+    fb.is_useful = False
+    fb.resolved = False
+    fb.save()
+
+    # Registrar log
+    TicketLog.objects.create(
+        ticket=None,
+        user=user,
+        action="faq.unresolved",
+        meta_json={"faq_id": faq.id, "question": faq.question}
+    )
+
+    return Response({"ok": True})
+
+
 @login_required
 def asset_history_page(request, asset_id: str):
     qs = Ticket.objects.select_related("category", "assigned_to").filter(asset_id=asset_id)
@@ -2114,7 +2246,7 @@ def metrics_summary(request):
     - priority  : prioridad (low/medium/high/critical...)
     """
     user = request.user
-    qs = Ticket.objects.all()
+    qs = Ticket.objects.todo()
 
     # -----------------------------
     # RBAC
@@ -2697,7 +2829,11 @@ def ticket_list_state(request, state):
     # =========================================
     categories = Category.objects.all().order_by("name")
     priorities = Priority.objects.all().order_by("sla_minutes")
-    assignees = User.objects.filter(groups__name="tecnico").order_by("username")
+
+    # Aquí da igual quiénes sean, porque el filtro de asignado se oculta
+    assignees = User.objects.filter(
+        Q(groups__name="tecnico") | Q(groups__name="admin")
+    ).order_by("username")
 
     context = {
         "tickets": tickets,
@@ -2717,15 +2853,65 @@ def ticket_list_state(request, state):
         "priorities": priorities,
         "assignees": assignees,
 
-        "from_reports": True,
-        "is_tecnico": "tecnico" in roles,
+        # flags
+        "mine": mine,
+        "from_reports": True,       # viene desde un reporte / dashboard
+        "compact_filters": True,    # 👈 SOLO buscar + fechas
+        "state_filter": state,
+        "priority_filter": None,
     }
 
-    return render(request, "tickets/tickets_list.html", context)
+    return render(request, "tickets/ticket_list.html", context)
 
 
+@login_required
+def ticket_list_priority(request, priority_code):
 
+    priorities = {
+        "critica": "Crítica",
+        "alta": "Alta",
+        "media": "Media",
+        "baja": "Baja",
+    }
 
+    if priority_code not in priorities:
+        return redirect("ticket_list")
+
+    # Obtener tickets por prioridad
+    qs = Ticket.objects.filter(priority__code=priority_code).select_related(
+        "category", "priority", "assigned_to"
+    ).order_by("-created_at")
+
+    # RBAC
+    user = request.user
+    roles = set(user.groups.values_list("name", flat=True))
+
+    if "tecnico" in roles:
+        qs = qs.filter(assigned_to=user)
+    elif "admin" in roles:
+        pass  # Admin ve todo
+    else:
+        qs = qs.filter(requester=user)
+
+    tickets = list(qs)
+
+    # Datos extra necesarios
+    categories = Category.objects.all().order_by("name")
+    priorities_all = Priority.objects.all().order_by("sla_minutes")
+    assignees = User.objects.filter(
+        Q(groups__name="tecnico") | Q(groups__name="admin")
+    )
+
+    return render(request, "tickets/ticket_list.html", {
+        "tickets": tickets,
+        "priority_filter": priority_code,   # ← ACTIVAMOS MODO COMPACTO DESDE PRIORIDAD
+        "state_filter": None,
+        "compact_filters": True,            # ← Fuerza solo buscar/fechas
+        "categories": categories,
+        "priorities": priorities_all,
+        "assignees": assignees,
+        "from_reports": True,
+    })
 
 
 @login_required
@@ -2762,3 +2948,6 @@ def ticket_edit(request, pk):
     return render(request, "tickets/ticket_edit.html", {
         "ticket": ticket
     })
+
+
+

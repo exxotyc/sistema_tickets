@@ -3,6 +3,44 @@
 
 {% block extra_head %}
 <style>
+  /* Scroll personalizado para la tabla */
+.table-scroll-wrapper {
+  max-height: 500px;
+  overflow-y: auto;
+  border: 1px solid rgba(15,23,42,.06);
+  border-radius: 0.5rem;
+}
+
+/* Personalizar scrollbar webkit (Chrome, Safari, Edge) */
+.table-scroll-wrapper::-webkit-scrollbar {
+  width: 8px;
+}
+
+.table-scroll-wrapper::-webkit-scrollbar-track {
+  background: rgba(15,23,42,.04);
+  border-radius: 4px;
+}
+
+.table-scroll-wrapper::-webkit-scrollbar-thumb {
+  background: rgba(15,23,42,.2);
+  border-radius: 4px;
+  transition: background 0.2s ease;
+}
+
+.table-scroll-wrapper::-webkit-scrollbar-thumb:hover {
+  background: rgba(15,23,42,.4);
+}
+
+/* Firefox */
+.table-scroll-wrapper {
+  scrollbar-color: rgba(15,23,42,.2) rgba(15,23,42,.04);
+  scrollbar-width: thin;
+}
+
+/* Asegurar que la tabla sea responsive */
+.table-scroll-wrapper .table {
+  margin-bottom: 0;
+}
   .glass{
     background:rgba(255,255,255,.92);
     backdrop-filter:blur(6px);
@@ -40,10 +78,10 @@
   <!-- Mensaje Global -->
   <div id="globalMsg" class="alert d-none"></div>
 
-  <!-- Tabla -->
-  <div class="table-responsive">
+    <!-- Tabla -->
+  <div class="table-scroll-wrapper table-responsive">
     <table class="table table-hover align-middle">
-      <thead class="table-light">
+      <thead class="table-light" style="position: sticky; top: 0;">
         <tr>
           <th>Pregunta</th>
           <th>Categoría</th>
@@ -111,31 +149,58 @@
 {% block extra_js %}
 <script>
 // ===================================================================================
-// API helpers
+// TOKEN + CSRF HELPERS (MISMA VERSIÓN QUE EN FAQ PÚBLICO)
 // ===================================================================================
+
+function getCookie(name){
+  const m=document.cookie.match('(^|;)\\s*'+name+'\\s*=\\s*([^;]+)');
+  return m ? m.pop() : "";
+}
+
 function authHeader(){
   const t = localStorage.getItem("access_token");
-  return t ? { Authorization: "Bearer " + t } : {};
+  return t ? { Authorization:"Bearer "+t } : {};
 }
 
-async function apiFetch(url, opts = {}){
-  const r = await fetch(url, {
+// ===================================================================================
+// apiFetch CON CSRF + COOKIES (VERSIÓN CORRECTA)
+// ===================================================================================
+async function apiFetch(url, opts={}){
+  
+  const csrftoken = getCookie("csrftoken");
+  const token = localStorage.getItem("access_token");
+
+  const headers = {
+    "Content-Type":"application/json",
+    "X-CSRFToken": csrftoken,
+    ...(opts.headers || {}),
+    ...(token ? { Authorization:"Bearer "+token } : {})
+  };
+
+  const final = await fetch(url, {
     ...opts,
-    headers: { ...(opts.headers||{}), ...authHeader() }
+    headers,
+    credentials:"include" // ← ESTO ES LO QUE SOLUCIONA EL 403
   });
-  return r;
+
+  return final;
 }
 
+// ===================================================================================
+// sendJSON – Helper para POST / PUT
+// ===================================================================================
 async function sendJSON(url, method, body){
   const r = await apiFetch(url, {
     method,
-    headers:{ "Content-Type":"application/json", ...authHeader() },
     body: JSON.stringify(body)
   });
 
   if(!r.ok){
-    let msg = "Error";
-    try{ const j = await r.json(); msg = j.detail || j.error || JSON.stringify(j); }catch{}
+    let msg="Error";
+    try{
+      const j = await r.json();
+      msg = j.detail || j.error || JSON.stringify(j);
+    }catch{}
     return { ok:false, error:msg };
   }
 
@@ -179,6 +244,7 @@ async function sendJSON(url, method, body){
     formAlert.textContent = msg;
     formAlert.classList.remove("d-none");
   }
+
   function hideFormError(){
     formAlert.classList.add("d-none");
   }
@@ -202,7 +268,7 @@ async function sendJSON(url, method, body){
   // CARGAR FAQ
   // ------------------------------------------------------------------
   async function load(){
-    rows.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">Cargando…</td></tr>';
+    rows.innerHTML='<tr><td colspan="4" class="text-center text-muted py-4">Cargando…</td></tr>';
     const r = await apiFetch("/api/faqs/");
     const data = await r.json();
     records = data.results || data || [];
@@ -211,22 +277,22 @@ async function sendJSON(url, method, body){
 
   function render(){
     if(!records.length){
-      rows.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">Sin preguntas registradas</td></tr>';
+      rows.innerHTML='<tr><td colspan="4" class="text-center text-muted py-4">Sin preguntas registradas</td></tr>';
       return;
     }
 
-    rows.innerHTML = "";
+    rows.innerHTML="";
     records.forEach(f=>{
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
+      const tr=document.createElement("tr");
+      tr.innerHTML=`
         <td>${esc(f.question)}</td>
         <td>${esc(f.category_name || "-")}</td>
         <td>${f.is_active ? '<span class="badge text-bg-success">Sí</span>' : '<span class="badge text-bg-secondary">No</span>'}</td>
         <td class="text-end">
-          <button class="btn btn-outline-primary btn-sm btn-ripple me-1" data-edit="${f.id}">
+          <button class="btn btn-outline-primary btn-sm me-1" data-edit="${f.id}">
             <i class="bi bi-pencil"></i>
           </button>
-          <button class="btn btn-outline-danger btn-sm btn-ripple" data-del="${f.id}">
+          <button class="btn btn-outline-danger btn-sm" data-del="${f.id}">
             <i class="bi bi-trash"></i>
           </button>
         </td>
@@ -243,14 +309,13 @@ async function sendJSON(url, method, body){
     if(!edit) return;
 
     const id = Number(edit.dataset.edit);
-    const item = records.find(x => x.id === id);
+    const item = records.find(x=>x.id===id);
     if(!item) return;
 
     currentId = id;
     hideFormError();
 
     modalEl.querySelector(".modal-title").textContent = "Editar FAQ";
-
     f_question.value = item.question;
     f_answer.value = item.answer;
     f_category.value = item.category;
@@ -262,22 +327,22 @@ async function sendJSON(url, method, body){
   // ------------------------------------------------------------------
   // NUEVA FAQ
   // ------------------------------------------------------------------
-  btnNew.onclick = () => {
-    currentId = null;
+  btnNew.onclick = ()=>{
+    currentId=null;
     form.reset();
     hideFormError();
-    modalEl.querySelector(".modal-title").textContent = "Nueva FAQ";
+    modalEl.querySelector(".modal-title").textContent="Nueva FAQ";
     modal.show();
   };
 
   // ------------------------------------------------------------------
-  // GUARDAR
+  // GUARDAR FAQ
   // ------------------------------------------------------------------
-  form.onsubmit = async e => {
+  form.onsubmit=async e=>{
     e.preventDefault();
     hideFormError();
 
-    const payload = {
+    const payload={
       question: f_question.value.trim(),
       answer: f_answer.value.trim(),
       category: Number(f_category.value),
@@ -285,13 +350,13 @@ async function sendJSON(url, method, body){
     };
 
     let r;
-    if (currentId){
+    if(currentId){
       r = await sendJSON(`/api/faqs/${currentId}/`, "PUT", payload);
     } else {
       r = await sendJSON(`/api/faqs/`, "POST", payload);
     }
 
-    if (!r.ok){
+    if(!r.ok){
       showFormError(r.error);
       return;
     }
@@ -312,7 +377,7 @@ async function sendJSON(url, method, body){
     const f = records.find(x=>x.id===id);
     if(!f) return;
 
-    if(!confirm(`¿Eliminar la FAQ "${f.question}"?`)) return;
+    if(!confirm(`¿Eliminar la FAQ "${f.question}"?`))return;
 
     const r = await apiFetch(`/api/faqs/${id}/`, { method:"DELETE" });
 
@@ -326,7 +391,7 @@ async function sendJSON(url, method, body){
   });
 
   // INIT
-  btnReload.onclick = load;
+  btnReload.onclick=load;
   loadCategories();
   load();
 

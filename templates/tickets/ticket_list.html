@@ -42,25 +42,15 @@
     background: rgba(0,0,0,.05);
   }
 </style>
+
+
 {% endblock %}
 
 {% block content %}
 
-{% if from_reports %}
-<div class="glass mb-3 p-3 d-flex justify-content-between align-items-center">
-    
-    <h1 class="h5 m-0 d-flex align-items-center gap-2">
-        <i class="bi bi-filter-circle text-primary"></i>
-        Tickets {{ state_pretty }} ({{ state_count }})
-    </h1>
-
-    <a href="{% url 'reports_page' %}" class="btn btn-outline-secondary btn-sm">
-        <i class="bi bi-arrow-left"></i> Volver a reportes
-    </a>
-
-</div>
-{% endif %}
-
+<!-- =========================================
+     HEADER LISTADO DE TICKETS
+========================================= -->
 <div class="glass mb-3">
   <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
     <h1 class="h5 m-0 d-flex align-items-center gap-2">
@@ -74,12 +64,12 @@
   </div>
 </div>
 
-<!-- ============================
-     FILTROS AVANZADOS
-============================= -->
+<!-- =========================================
+     FILTROS AVANZADOS (se muestran solo si compact_filters=False)
+========================================= -->
+{% if not compact_filters %}
 <div class="glass mb-3">
 
-  <!-- FORMULARIO CORREGIDO PARA MANTENER mine=1 -->
   <form method="get"
         action="{% if mine %}{% url 'ticket_list' %}?mine=1{% else %}{% url 'ticket_list' %}{% endif %}"
         class="row g-2 align-items-end">
@@ -126,27 +116,28 @@
       </select>
     </div>
 
-    <!-- Filtro Asignado: solo si NO estamos en "Mis tickets" -->
     {% if not mine %}
+    <!-- Asignado -->
     <div class="col-md-2">
       <label class="form-label">Asignado</label>
       <select name="assignee" class="form-select form-select-sm">
         <option value="">Todos</option>
         {% for u in assignees %}
-        <option value="{{ u.id }}" {% if assignee == u.id|stringformat:'s' %}selected{% endif %}>
-          {{ u.username }}
-        </option>
+          <option value="{{ u.id }}" {% if assignee == u.id|stringformat:'s' %}selected{% endif %}>
+            {{ u.username }}
+          </option>
         {% endfor %}
       </select>
     </div>
     {% endif %}
 
-    <!-- Fechas -->
+    <!-- Desde -->
     <div class="col-md-2">
       <label class="form-label">Desde</label>
       <input type="date" name="from" value="{{ from }}" class="form-control form-control-sm">
     </div>
 
+    <!-- Hasta -->
     <div class="col-md-2">
       <label class="form-label">Hasta</label>
       <input type="date" name="to" value="{{ to }}" class="form-control form-control-sm">
@@ -165,12 +156,48 @@
 
   </form>
 </div>
+{% endif %}
 
-<!-- ============================
+<!-- =========================================
+     FILTROS REDUCIDOS (cuando compact_filters=True)
+========================================= -->
+{% if compact_filters %}
+<div class="glass mb-3">
+
+  <form method="get" class="row g-2 align-items-end">
+
+    <!-- Buscar -->
+    <div class="col-md-4">
+      <label class="form-label">Buscar</label>
+      <input type="text" name="q" value="{{ q }}" class="form-control form-control-sm"
+             placeholder="Título, descripción o #ID">
+    </div>
+
+    <!-- Desde -->
+    <div class="col-md-3">
+      <label class="form-label">Desde</label>
+      <input type="date" name="from" value="{{ from }}" class="form-control form-control-sm">
+    </div>
+
+    <!-- Hasta -->
+    <div class="col-md-3">
+      <label class="form-label">Hasta</label>
+      <input type="date" name="to" value="{{ to }}" class="form-control form-control-sm">
+    </div>
+
+    <div class="col-md-2">
+      <button class="btn btn-outline-secondary btn-sm w-100">Filtrar</button>
+    </div>
+
+  </form>
+
+</div>
+{% endif %}
+
+<!-- =========================================
      TABLA DE TICKETS
-============================= -->
+========================================= -->
 <div class="glass">
-
   <div class="scroll-area table-responsive">
 
     <table class="table table-hover align-middle">
@@ -186,14 +213,14 @@
           <th></th>
         </tr>
       </thead>
-      <tbody>
 
+      <tbody>
         {% for t in tickets %}
         <tr>
           <td>#{{ t.id }}</td>
           <td>{{ t.title }}</td>
-          <td>{{ t.category.name }}</td>
-          <td>{{ t.priority.name }}</td>
+          <td>{{ t.category.name|default:"—" }}</td>
+          <td>{{ t.priority.name|default:"—" }}</td>
 
           <td>
             {% if t.state == "open" %}
@@ -213,8 +240,9 @@
           <td>{{ t.created_at|date:"Y-m-d H:i" }}</td>
 
           <td>
-            <a href="{% url 'ticket_detail' t.id %}" data-hard-nav="1"
-               class="btn btn-outline-primary btn-sm">
+            <a href="{% url 'ticket_detail' t.id %}"
+               class="btn btn-outline-primary btn-sm"
+               data-hard-nav="1">
               Ver
             </a>
           </td>
@@ -227,14 +255,15 @@
           </td>
         </tr>
         {% endfor %}
-
       </tbody>
+
     </table>
 
   </div>
 </div>
 
 {% endblock %}
+
 
 {% block extra_js %}
 <script>

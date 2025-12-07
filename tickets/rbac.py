@@ -7,6 +7,8 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.db import transaction
 
+
+
 # Ajusta este set según nomenclatura real.
 MANAGED_ROLE_NAMES: Set[str] = {"admin", "tecnico", "usuario"}
 

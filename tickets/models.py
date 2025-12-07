@@ -1,12 +1,15 @@
 import logging
 from datetime import timedelta
+
 from django.db import models
 from django.contrib.auth.models import User, Group
-from django.utils.timezone import now
+from django.utils import timezone   # ← este es el correcto
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
 from .services.sla import calculate_sla_status
+from django.core.validators import FileExtensionValidator
+from .validators import validate_safe_image
 
 
 # ==========================
@@ -37,10 +40,28 @@ class Priority(models.Model):
         return f"{self.name} ({self.code})"
 
 
+class TicketQuerySet(models.QuerySet):
+    def visibles(self):
+        """Tickets creados en los últimos 30 días."""
+        cutoff = timezone.now() - timedelta(days=30)
+        return self.filter(created_at__gte=cutoff)
+
+
+class TicketManager(models.Manager):
+    """Manager que devuelve solo tickets visibles por defecto."""
+    def get_queryset(self):
+        return TicketQuerySet(self.model, using=self._db).visibles()
+
+    # Si algún día quieres obtener todos los tickets:
+    def todos(self):
+        return TicketQuerySet(self.model, using=self._db).all()
+
+
 # ==========================
 #   TICKET
 # ==========================
 class Ticket(models.Model):
+    objects = TicketManager()  # ← reemplaza el manager
     title = models.CharField(max_length=200)
     description = models.TextField()
 
@@ -277,6 +298,9 @@ class FAQFeedback(models.Model):
     resolved = models.BooleanField(default=False)  # IMPORTANTE
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        unique_together = [("faq", "user")]
+
 
 # ==========================
 #   COMMENT
@@ -348,7 +372,12 @@ class Area(models.Model):
 #   UserProfile (NUEVA)
 # ==========================
 class UserProfile(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name="profile"
+    )
+
     area = models.ForeignKey(
         Area,
         null=True,
@@ -356,10 +385,19 @@ class UserProfile(models.Model):
         on_delete=models.SET_NULL,
         related_name="users"
     )
+
     auto_assign_enabled = models.BooleanField(default=True)
+
+    # NUEVO: foto de perfil
+    profile_picture = models.ImageField(
+        upload_to="profiles/",
+        null=True,
+        blank=True
+    )
 
     def __str__(self):
         return f"Perfil de {self.user.username}"
+
 
 
 
@@ -370,6 +408,29 @@ def create_user_profile(sender, instance, created, **kwargs):
         UserProfile.objects.create(user=instance)
 
 
+def profile_upload_path(instance, filename):
+    # Limpia el nombre del archivo
+    name = filename.lower().replace(" ", "_").strip()
+    return f"profiles/{instance.user.id}/{name}"
+
+
+class UserExtension(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+
+    profile_picture = models.ImageField(
+        upload_to=profile_upload_path,
+        null=True,
+        blank=True,
+        validators=[
+            FileExtensionValidator(
+                allowed_extensions=["jpg", "jpeg", "png", "webp"]
+            ),
+            validate_safe_image,  # ← SE AGREGA VALIDACIÓN REAL
+        ],
+    )
+
+    def __str__(self):
+        return f"Extensión de {self.user.username}"
 
 # ==========================
 # Autoasignacion   
@@ -419,4 +480,5 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"[{self.type}] {self.title}"
+
 

@@ -5,6 +5,45 @@
 <style>
   .glass{background:rgba(255,255,255,.92);backdrop-filter:blur(6px);border:1px solid rgba(15,23,42,.06);border-radius:1rem}
   .row-gap{row-gap:12px}
+
+  /* Scroll personalizado para la tabla */
+  .table-scroll-wrapper {
+    max-height: 500px;
+    overflow-y: auto;
+    border: 1px solid rgba(15,23,42,.06);
+    border-radius: 0.5rem;
+  }
+
+  /* Personalizar scrollbar webkit (Chrome, Safari, Edge) */
+  .table-scroll-wrapper::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .table-scroll-wrapper::-webkit-scrollbar-track {
+    background: rgba(15,23,42,.04);
+    border-radius: 4px;
+  }
+
+  .table-scroll-wrapper::-webkit-scrollbar-thumb {
+    background: rgba(15,23,42,.2);
+    border-radius: 4px;
+    transition: background 0.2s ease;
+  }
+
+  .table-scroll-wrapper::-webkit-scrollbar-thumb:hover {
+    background: rgba(15,23,42,.4);
+  }
+
+  /* Firefox */
+  .table-scroll-wrapper {
+    scrollbar-color: rgba(15,23,42,.2) rgba(15,23,42,.04);
+    scrollbar-width: thin;
+  }
+
+  /* Asegurar que la tabla sea responsive */
+  .table-scroll-wrapper .table {
+    margin-bottom: 0;
+  }
 </style>
 {% endblock %}
 
@@ -30,9 +69,10 @@
     <input id="q" class="form-control" placeholder="Buscar…">
   </div>
 
-  <div class="table-responsive">
+  <!-- TABLA CON SCROLL -->
+  <div class="table-scroll-wrapper">
     <table class="table table-hover align-middle">
-      <thead class="table-light">
+      <thead class="table-light" style="position: sticky; top: 0;">
         <tr>
           <th style="width:90px">ID</th>
           <th>Nombre</th>
@@ -49,87 +89,211 @@
 
 {% block extra_js %}
 <script>
-function esc(s){return String(s||"").replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));}
-async function apiFetch(url, opts={}){
-  const t=localStorage.getItem("access_token"); if(!t){ alert("Sesión inválida"); return null; }
-  const r=await fetch(url, {...opts, headers:{...(opts.headers||{}), Authorization:"Bearer "+t}});
-  if(r.status===401){ alert("No autorizado"); return null; }
-  return r;
+/* ============================================================
+      ESCAPAR STRINGS PARA EVITAR XSS EN INPUTS
+============================================================ */
+function esc(s){
+    return String(s || "").replace(/[&<>"']/g, m => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;', '"':'&quot;', "'":'&#39;'
+    }[m]));
 }
-let allItems=[];
 
+/* ============================================================
+      OBTENER CSRF DESDE LAS COOKIES (Django)
+============================================================ */
+function getCSRFToken(){
+    const cookie = document.cookie
+        .split("; ")
+        .find(row => row.startsWith("csrftoken="));
+    return cookie ? cookie.split("=")[1] : "";
+}
+
+/* ============================================================
+      API WRAPPER — AGREGA JWT AUTOMÁTICAMENTE
+============================================================ */
+async function apiFetch(url, opts = {}){
+    const t = localStorage.getItem("access_token");
+
+    if(!t){
+        alert("Sesión inválida");
+        return null;
+    }
+
+    // Inyectamos Authorization + dejamos extender headers
+    const r = await fetch(url, {
+        ...opts,
+        headers:{
+            ...(opts.headers || {}),
+            Authorization: "Bearer " + t
+        }
+    });
+
+    if(r.status === 401){
+        alert("No autorizado");
+        return null;
+    }
+
+    return r;
+}
+
+let allItems = [];
+
+/* ============================================================
+      RENDERIZAR TABLA
+============================================================ */
 function render(list){
-  const tb=document.getElementById("rows");
-  if(!list.length){ tb.innerHTML='<tr><td colspan="3" class="text-center text-muted py-4">Sin categorías</td></tr>'; return; }
-  tb.innerHTML="";
-  for(const c of list){
-    const tr=document.createElement("tr");
-    tr.innerHTML=`
-      <td>${c.id}</td>
-      <td>
-        <input class="form-control form-control-sm" value="${esc(c.name||"")}" data-id="${c.id}">
-      </td>
-      <td class="text-end">
-        <button class="btn btn-sm btn-outline-primary me-1" data-act="save" data-id="${c.id}">
-          <i class="bi bi-save"></i> Guardar
-        </button>
-        <button class="btn btn-sm btn-outline-danger" data-act="del" data-id="${c.id}">
-          <i class="bi bi-trash"></i> Eliminar
-        </button>
-      </td>`;
-    tb.appendChild(tr);
-  }
+    const tb = document.getElementById("rows");
+
+    if(!list.length){
+        tb.innerHTML = `
+            <tr>
+                <td colspan="3" class="text-center text-muted py-4">
+                    Sin categorías
+                </td>
+            </tr>`;
+        return;
+    }
+
+    tb.innerHTML = "";
+
+    for(const c of list){
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td>${c.id}</td>
+            <td>
+                <input class="form-control form-control-sm"
+                       value="${esc(c.name || "")}"
+                       data-id="${c.id}">
+            </td>
+            <td class="text-end">
+                <button class="btn btn-sm btn-outline-primary me-1"
+                        data-act="save" data-id="${c.id}">
+                    <i class="bi bi-save"></i> Guardar
+                </button>
+                <button class="btn btn-sm btn-outline-danger"
+                        data-act="del" data-id="${c.id}">
+                    <i class="bi bi-trash"></i> Eliminar
+                </button>
+            </td>`;
+        tb.appendChild(tr);
+    }
 }
 
+/* ============================================================
+      CARGAR CATEGORÍAS DESDE LA API
+============================================================ */
 async function load(){
-  const r=await apiFetch("/api/categories/");
-  if(!r) return;
-  const data=await r.json();
-  allItems = Array.isArray(data)?data:(data.results||[]);
-  applyFilter();
+    const r = await apiFetch("/api/categories/");
+    if(!r) return;
+
+    const data = await r.json();
+
+    // DRF puede devolver {results: []} o []
+    allItems = Array.isArray(data) ? data : (data.results || []);
+    applyFilter();
 }
 
+/* ============================================================
+      FILTRO DE BÚSQUEDA
+============================================================ */
 function applyFilter(){
-  const q=document.getElementById("q").value.trim().toLowerCase();
-  const list=!q?allItems:allItems.filter(x=>(x.name||"").toLowerCase().includes(q));
-  render(list);
+    const q = document.getElementById("q").value.trim().toLowerCase();
+    const list = !q
+        ? allItems
+        : allItems.filter(x => (x.name || "").toLowerCase().includes(q));
+
+    render(list);
 }
 
 document.getElementById("q").addEventListener("input", applyFilter);
 
+/* ============================================================
+      CREAR NUEVA CATEGORÍA  (POST)
+============================================================ */
 document.getElementById("frmNew").addEventListener("submit", async (e)=>{
-  e.preventDefault();
-  const name=document.getElementById("newName").value.trim();
-  if(!name) return;
-  const r=await apiFetch("/api/categories/", {
-    method:"POST", headers:{ "Content-Type":"application/json" },
-    body: JSON.stringify({ name })
-  });
-  if(!r || !r.ok){ alert("No se pudo crear"); return; }
-  document.getElementById("newName").value="";
-  load();
-});
+    e.preventDefault();
 
-document.getElementById("rows").addEventListener("click", async (e)=>{
-  const btn=e.target.closest("button[data-act]"); if(!btn) return;
-  const id=btn.dataset.id;
-  if(btn.dataset.act==="save"){
-    const input=document.querySelector(`input[data-id="${id}"]`);
-    const name=input.value.trim();
-    const r=await apiFetch(`/api/categories/${id}/`, {
-      method:"PATCH", headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({ name })
+    const name = document.getElementById("newName").value.trim();
+    if(!name) return;
+
+    const r = await apiFetch("/api/categories/", {
+        method: "POST",
+        headers:{
+            "Content-Type": "application/json",
+            "X-CSRFToken": getCSRFToken()
+        },
+        body: JSON.stringify({ name })
     });
-    if(!r || !r.ok){ alert("No se pudo guardar"); return; }
+
+    if(!r || !r.ok){
+        alert("No se pudo crear");
+        return;
+    }
+
+    document.getElementById("newName").value = "";
     load();
-  }else if(btn.dataset.act==="del"){
-    if(!confirm("¿Eliminar categoría?")) return;
-    const r=await apiFetch(`/api/categories/${id}/`, { method:"DELETE" });
-    if(!r || (r.status!==204 && !r.ok)){ alert("No se pudo eliminar"); return; }
-    load();
-  }
 });
 
+/* ============================================================
+      CLICK EN GUARDAR / ELIMINAR  (PATCH / DELETE)
+============================================================ */
+document.getElementById("rows").addEventListener("click", async (e)=>{
+    const btn = e.target.closest("button[data-act]");
+    if(!btn) return;
+
+    const id = btn.dataset.id;
+
+    /* -------------------------------
+         GUARDAR CATEGORÍA (PATCH)
+    -------------------------------- */
+    if(btn.dataset.act === "save"){
+        const input = document.querySelector(`input[data-id="${id}"]`);
+        const name = input.value.trim();
+
+        const r = await apiFetch(`/api/categories/${id}/`, {
+            method: "PATCH",
+            headers:{
+                "Content-Type": "application/json",
+                "X-CSRFToken": getCSRFToken()
+            },
+            body: JSON.stringify({ name })
+        });
+
+        if(!r || !r.ok){
+            alert("No se pudo guardar");
+            return;
+        }
+
+        load();
+    }
+
+    /* -------------------------------
+         ELIMINAR CATEGORÍA (DELETE)
+    -------------------------------- */
+    else if(btn.dataset.act === "del"){
+        if(!confirm("¿Eliminar categoría?")) return;
+
+        const r = await apiFetch(`/api/categories/${id}/`, {
+            method: "DELETE",
+            headers:{
+                "X-CSRFToken": getCSRFToken()
+            }
+        });
+
+        if(!r || (r.status !== 204 && !r.ok)){
+            alert("No se pudo eliminar");
+            return;
+        }
+
+        load();
+    }
+});
+
+/* ============================================================
+      INICIALIZAR
+============================================================ */
 load();
 </script>
+
 {% endblock %}
+

@@ -1,14 +1,15 @@
 # tickets/serializers.py
+# tickets/serializers.py
 import hashlib
 import mimetypes
+import uuid
+import magic   # requiere libmagic instalado en el sistema
 
 from django.contrib.auth import get_user_model, password_validation
+from django.core.exceptions import ValidationError
 from rest_framework import serializers
 
-from .models import Attachment
-from django.core.exceptions import ValidationError
-import magic   # sudo apt install libmagic1
-
+# Imports correctos desde el propio módulo
 from . import rbac
 from .models import (
     Area,
@@ -19,23 +20,20 @@ from .models import (
     Category,
     FAQ,
     Priority,
+    FAQFeedback,
+    UserExtension,   # ← agregado correctamente
 )
 
 UserModel = get_user_model()
 
-import uuid
 
 
 # ==========================================================
-#   USER SUMMARY (NECESARIO ANTES DE UserAdminSerializer)
-# ==========================================================
-# ==========================================================
-#   USERS
+#   USER SUMMARY (LISTADO / VISTAS GENERALES)
 # ==========================================================
 class UserSummarySerializer(serializers.ModelSerializer):
     roles = serializers.SerializerMethodField()
 
-    # Área solo lectura (para listar / ver)
     area = serializers.PrimaryKeyRelatedField(
         source="profile.area",
         read_only=True
@@ -44,6 +42,9 @@ class UserSummarySerializer(serializers.ModelSerializer):
         source="profile.area.name",
         read_only=True
     )
+
+    # ➕ NUEVO: Avatar URL para navbar y mantenedor
+    profile_picture_url = serializers.SerializerMethodField()
 
     class Meta:
         model = UserModel
@@ -58,12 +59,28 @@ class UserSummarySerializer(serializers.ModelSerializer):
             "roles",
             "area",
             "area_name",
+            "profile_picture_url",
         ]
 
+    # Roles limpios
     def get_roles(self, obj):
         return rbac.user_managed_roles(obj)
 
+    # Avatar URL
+    def get_profile_picture_url(self, obj):
+        try:
+            ext = obj.userextension
+            if ext.profile_picture:
+                request = self.context.get("request")
+                return request.build_absolute_uri(ext.profile_picture.url) if request else ext.profile_picture.url
+        except UserExtension.DoesNotExist:
+            pass
+        return None
 
+
+# ==========================================================
+#   USER ADMIN (CREAR / EDITAR USUARIOS)
+# ==========================================================
 class UserAdminSerializer(UserSummarySerializer):
     password = serializers.CharField(write_only=True, required=False, allow_blank=True)
     roles = serializers.ListField(
@@ -72,102 +89,17 @@ class UserAdminSerializer(UserSummarySerializer):
         allow_empty=True,
     )
 
-    # Área editable (perfil)
+    # Área editable
     area = serializers.PrimaryKeyRelatedField(
         source="profile.area",
         queryset=Area.objects.all(),
         required=False,
-        allow_null=True,
+        allow_null=True
     )
 
-    class Meta(UserSummarySerializer.Meta):
-        fields = UserSummarySerializer.Meta.fields + [
-            "password",
-            "area",
-        ]
-
-    # ------------------------
-    # VALIDACIONES
-    # ------------------------
-    def validate_password(self, value):
-        if value:
-            password_validation.validate_password(value, self.instance or None)
-        return value
-
-    def validate_roles(self, value):
-        return rbac.clean_roles(value)
-
-    # ------------------------
-    # CREATE
-    # ------------------------
-    def create(self, validated_data):
-        roles = validated_data.pop("roles", [])
-        password = validated_data.pop("password", "")
-        profile_data = validated_data.pop("profile", {})
-        area = profile_data.get("area")
-
-        if not password:
-            password = UserModel.objects.make_random_password()
-
-        user = UserModel(**validated_data)
-        user.set_password(password)
-        user.save()
-
-        # Aseguramos profile + área
-        profile = getattr(user, "profile", None)
-        if profile is not None and area:
-            profile.area = area
-            profile.save()
-
-        rbac.apply_roles(user, roles)
-        return user
-
-    # ------------------------
-    # UPDATE
-    # ------------------------
-    def update(self, instance, validated_data):
-        roles = validated_data.pop("roles", None)
-        password = validated_data.pop("password", "")
-        profile_data = validated_data.pop("profile", {})
-        new_area = profile_data.get("area", None)
-
-        # Campos normales
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-
-        if password:
-            instance.set_password(password)
-
-        instance.save()
-
-        # Actualizar área en profile
-        profile = getattr(instance, "profile", None)
-        if profile is not None and new_area is not None:
-            profile.area = new_area
-            profile.save()
-
-        if roles is not None:
-            rbac.apply_roles(instance, roles)
-
-        return instance
-
-
-
-# ==========================================================
-#   USER ADMIN (CON AREA)
-# ==========================================================
-class UserAdminSerializer(UserSummarySerializer):
-    password = serializers.CharField(write_only=True, required=False, allow_blank=True)
-    roles = serializers.ListField(
-        child=serializers.CharField(),
-        required=False,
-        allow_empty=True
-    )
-
-    # ➕ NUEVO CAMPO: Área del usuario (profile.area)
-    area = serializers.PrimaryKeyRelatedField(
-        source="profile.area",
-        queryset=Area.objects.all(),
+    # ➕ NUEVO: permitir subir avatar
+    profile_picture = serializers.ImageField(
+        source="userextension.profile_picture",
         required=False,
         allow_null=True
     )
@@ -176,6 +108,7 @@ class UserAdminSerializer(UserSummarySerializer):
         fields = UserSummarySerializer.Meta.fields + [
             "password",
             "area",
+            "profile_picture",
         ]
 
     # ------------------------
@@ -196,22 +129,31 @@ class UserAdminSerializer(UserSummarySerializer):
         roles = validated_data.pop("roles", [])
         password = validated_data.pop("password", "")
 
-        # Extraemos el área desde profile.area
         profile_data = validated_data.pop("profile", {})
         area = profile_data.get("area")
+
+        # Avatar
+        extension_data = validated_data.pop("userextension", {})
+        avatar = extension_data.get("profile_picture")
 
         if not password:
             password = UserModel.objects.make_random_password()
 
-        # Crear usuario
+        # Crear usuario base
         user = UserModel(**validated_data)
         user.set_password(password)
         user.save()
 
-        # Guardar área en profile
+        # Crear y asignar área
         if area:
             user.profile.area = area
             user.profile.save()
+
+        # Crear extensión
+        UserExtension.objects.update_or_create(
+            user=user,
+            defaults={"profile_picture": avatar}
+        )
 
         # Aplicar roles
         rbac.apply_roles(user, roles)
@@ -225,10 +167,13 @@ class UserAdminSerializer(UserSummarySerializer):
         roles = validated_data.pop("roles", None)
         password = validated_data.pop("password", "")
 
-        # Área desde el profile
         profile_data = validated_data.pop("profile", {})
         new_area = profile_data.get("area")
 
+        extension_data = validated_data.pop("userextension", {})
+        new_avatar = extension_data.get("profile_picture")
+
+        # Actualizar campos normales del usuario
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
 
@@ -242,11 +187,23 @@ class UserAdminSerializer(UserSummarySerializer):
             instance.profile.area = new_area
             instance.profile.save()
 
-        # Aplicar roles
+        # Actualizar o eliminar avatar
+        ext, _ = UserExtension.objects.get_or_create(user=instance)
+        if new_avatar is None:
+            pass  # no cambio
+        else:
+            ext.profile_picture = new_avatar
+            ext.save()
+
+        # Actualizar roles
         if roles is not None:
             rbac.apply_roles(instance, roles)
 
         return instance
+
+
+
+
 
 
 # ==========================================================
@@ -441,9 +398,30 @@ class CommentSerializer(serializers.ModelSerializer):
 # ==========================================================
 #   FAQ
 # ==========================================================
+
 class FAQSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source="category.name", read_only=True)
     unresolved = serializers.IntegerField(source="feedback.count", read_only=True)
+
+    has_voted = serializers.SerializerMethodField()
+    user_vote = serializers.SerializerMethodField()  # ← LO QUE FALTABA
+
+    def get_has_voted(self, obj):
+        user = self.context["request"].user
+        if not user or not user.is_authenticated:
+            return False
+        return FAQFeedback.objects.filter(faq=obj, user=user).exists()
+
+    def get_user_vote(self, obj):
+        user = self.context["request"].user
+        if not user or not user.is_authenticated:
+            return None
+
+        fb = FAQFeedback.objects.filter(faq=obj, user=user).first()
+        if not fb:
+            return None
+
+        return "useful" if fb.is_useful else "unresolved"
 
     class Meta:
         model = FAQ
@@ -457,8 +435,20 @@ class FAQSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "unresolved",
+            "has_voted",
+            "user_vote",   # ← ESTO YA ES VÁLIDO
         ]
-        read_only_fields = ["category_name", "created_at", "updated_at", "unresolved"]
+        read_only_fields = [
+            "category_name",
+            "created_at",
+            "updated_at",
+            "unresolved",
+            "has_voted",
+            "user_vote",
+        ]
+
+
+
 
 
 # ==========================================================

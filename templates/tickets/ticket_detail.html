@@ -914,7 +914,7 @@ async function assignTicketTo(userId){
     return;
   }
 
-  const res = await sendJSON(`/api/tickets/${TICKET_ID}/assign/`,"POST",{ user_id:Number(userId) });
+const res = await sendJSON(`/api/tickets/${TICKET_ID}/assign/`,"POST",{ assigned_to:Number(userId) });
   if(!res.ok){
     msg.textContent=res.error;
     msg.className="form-text text-danger";
