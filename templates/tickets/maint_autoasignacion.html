@@ -3,6 +3,55 @@
 
 {% block extra_head %}
 <style>
+
+  /* ---------- Historial: contenedor + scroll seguro ---------- */
+  .history-box {
+    border: 1px solid rgba(15,23,42,.08);
+    border-radius: .7rem;
+    padding: 0; /* mover padding al wrapper interior para que el sticky funcione bien */
+    background: rgba(255,255,255,.78);
+  }
+
+  .history-scroll-wrapper {
+    max-height: 320px;
+    overflow-y: auto;
+    padding: 1rem;           /* padding interior para separar contenido */
+    border-radius: .7rem;
+    border-top-left-radius: .7rem;
+    border-top-right-radius: .7rem;
+    border-bottom-left-radius: .7rem;
+    border-bottom-right-radius: .7rem;
+    border: none;            /* ya hay borde en .history-box */
+    background: transparent;
+  }
+
+  /* asegurar que la tabla use todo el ancho sin márgenes internos que rompan el sticky */
+  .history-scroll-wrapper table {
+    width: 100%;
+    margin: 0;
+    border-collapse: collapse;
+  }
+
+  /* Cabecera sticky: fondo opaco + z-index mayor para que no se mezcle con filas */
+  .history-scroll-wrapper thead th {
+    position: sticky;
+    top: 0;
+    background: rgba(255,255,255,0.98);
+    z-index: 10;
+    padding-top: .45rem;
+    padding-bottom: .45rem;
+  }
+
+  /* Scrollbar estilado */
+  .history-scroll-wrapper::-webkit-scrollbar { width: 8px; }
+  .history-scroll-wrapper::-webkit-scrollbar-track { background: rgba(15,23,42,.03); }
+  .history-scroll-wrapper::-webkit-scrollbar-thumb {
+    background: rgba(15,23,42,.18);
+    border-radius: 6px;
+  }
+  .history-scroll-wrapper::-webkit-scrollbar-thumb:hover { background: rgba(15,23,42,.32); }
+  .history-scroll-wrapper { scrollbar-color: rgba(15,23,42,.18) rgba(15,23,42,.03); scrollbar-width: thin; }
+
   .card-pro {
     background: rgba(255,255,255,0.92);
     backdrop-filter: blur(6px);
@@ -293,9 +342,10 @@
   ============================-->
   <h5 class="mt-5 mb-3">Historial reciente de autoasignaciones</h5>
 
-  <div class="history-box">
-    {% if history %}
-      <table class="table table-sm">
+<div class="history-box">
+  {% if history %}
+    <div class="history-scroll-wrapper">
+      <table class="table table-sm mb-0">
         <thead>
           <tr>
             <th>Fecha</th>
@@ -305,20 +355,21 @@
           </tr>
         </thead>
         <tbody>
-        {% for log in history %}
-          <tr>
-            <td>{{ log.created_at|date:"d/m/Y H:i" }}</td>
-            <td>#{{ log.ticket.id }} - {{ log.ticket.title }}</td>
-            <td>{{ log.ticket.area }}</td>
-            <td>{{ log.meta_json.assigned_to }}</td>
-          </tr>
-        {% endfor %}
+          {% for log in history %}
+            <tr>
+              <td>{{ log.created_at|date:"d/m/Y H:i" }}</td>
+              <td>#{{ log.ticket.id }} - {{ log.ticket.title }}</td>
+              <td>{{ log.ticket.area }}</td>
+              <td>{{ log.meta_json.assigned_to }}</td>
+            </tr>
+          {% endfor %}
         </tbody>
       </table>
-    {% else %}
-      <p class="text-muted m-0">No hay autoasignaciones registradas.</p>
-    {% endif %}
-  </div>
+    </div>
+  {% else %}
+    <p class="text-muted m-0">No hay autoasignaciones registradas.</p>
+  {% endif %}
+</div>
   <!-- Contenedor Toasts -->
     <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toast-container"></div>
 

@@ -2048,18 +2048,21 @@ def reports_data(request):
     if not _is_admin_or_tech(request.user):
         return HttpResponseForbidden("No autorizado")
 
+    # ============================================
+    # 1) QS BASE (para gráficos y tabla principal)
+    # ============================================
     qs = _reports_base_queryset(request).order_by("-created_at")
 
-    # Conteo por estado
+    # --- Conteo por estado
     by_state = Counter(qs.values_list("state", flat=True))
 
-    # Serie por mes
+    # --- Serie por mes
     by_month = defaultdict(int)
     for dt in qs.values_list("created_at", flat=True):
         key = dt.strftime("%Y-%m")
         by_month[key] += 1
 
-    # Tabla (limitamos para no enviar miles de filas)
+    # --- Tabla principal (máx 300)
     rows = []
     for t in qs.select_related("assigned_to")[:300]:
         rows.append(
@@ -2072,14 +2075,93 @@ def reports_data(request):
             }
         )
 
+    # ====================================================================================
+    # 2) 🔥 RANKING REAL DE TÉCNICOS (GLOBAL, sin filtros del usuario)
+    # ====================================================================================
+    from django.db.models import Count, Avg, DurationField, ExpressionWrapper, F
+
+    # Usamos TODOS los tickets asignados, no solo los filtrados
+    tech_qs = Ticket.objects.filter(assigned_to__isnull=False)
+
+    # Tickets resueltos (resolved + closed)
+    resolved_qs = tech_qs.filter(state__in=["resolved", "closed"])
+
+    # Duración promedio por ticket
+    resolution_time = ExpressionWrapper(
+        F("updated_at") - F("created_at"),
+        output_field=DurationField()
+    )
+
+    # --- Estadísticas de resolución
+    tech_res_stats = (
+        resolved_qs
+        .annotate(duration=resolution_time)
+        .values("assigned_to__id", "assigned_to__username")
+        .annotate(
+            resolved_count=Count("id"),
+            avg_resolution=Avg("duration"),
+        )
+    )
+
+    # --- Total asignados por técnico (global)
+    tech_assign_stats = (
+        tech_qs
+        .values("assigned_to__id", "assigned_to__username")
+        .annotate(total_assigned=Count("id"))
+    )
+
+    # --- Unificar datos
+    tech_table = {}
+
+    # base
+    for a in tech_assign_stats:
+        uid = a["assigned_to__id"]
+        tech_table[uid] = {
+            "id": uid,
+            "username": a["assigned_to__username"],
+            "total_assigned": a["total_assigned"],
+            "resolved": 0,
+            "avg_resolution": None,
+            "close_rate": 0,
+        }
+
+    # resolved + promedio
+    for r in tech_res_stats:
+        uid = r["assigned_to__id"]
+        if uid in tech_table:
+            tech_table[uid]["resolved"] = r["resolved_count"]
+
+            if r["avg_resolution"]:
+                tech_table[uid]["avg_resolution"] = r["avg_resolution"].total_seconds()
+
+    # Cálculo tasa de cierre
+    for uid, t in tech_table.items():
+        if t["total_assigned"] > 0:
+            t["close_rate"] = round((t["resolved"] / t["total_assigned"]) * 100, 1)
+
+    # Ranking final
+    tech_ranking = sorted(
+        tech_table.values(),
+        key=lambda x: (x["resolved"], -(x["avg_resolution"] or 0)),
+        reverse=True
+    )
+
+    # ====================================================================================
+    # 3) RESPUESTA FINAL
+    # ====================================================================================
     return JsonResponse(
         {
             "by_state": by_state,
             "by_month": dict(sorted(by_month.items())),
             "rows": rows,
             "total": qs.count(),
+
+            # ranking técnico global real:
+            "tech_ranking": tech_ranking[:10],
+            "tech_table": list(tech_table.values()),
         }
     )
+
 
 @login_required
 def reports_export_csv(request):

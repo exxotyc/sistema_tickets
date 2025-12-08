@@ -16,19 +16,17 @@
 }
 
 /* ===========================================
-      SCROLL UNIVERSAL PARA REPORTES
+      SCROLL PARA TABLAS
 =========================================== */
 .report-scroll {
-    max-height: 360px;         /* altura profesional para dashboards */
+    max-height: 360px;
     overflow-y: auto;
     overflow-x: hidden;
     padding-right: 6px;
 }
 
 /* Scroll Chrome */
-.report-scroll::-webkit-scrollbar {
-    width: 7px;
-}
+.report-scroll::-webkit-scrollbar { width: 7px; }
 .report-scroll::-webkit-scrollbar-thumb {
     background: rgba(0,0,0,0.25);
     border-radius: 8px;
@@ -38,18 +36,10 @@
 }
 
 /* Scroll Firefox */
-.report-scroll {
-    scrollbar-color: rgba(0,0,0,0.35) transparent;
-    scrollbar-width: thin;
-}
+.report-scroll { scrollbar-color: rgba(0,0,0,0.35) transparent; scrollbar-width: thin; }
 
-/* ===========================================
-      OPCIONAL: Tabla compacta
-=========================================== */
-.table-hover tbody tr:hover {
-    background: rgba(15,23,42,.04);
-}
-
+/* Hover table */
+.table-hover tbody tr:hover { background: rgba(15,23,42,.04); }
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -66,18 +56,16 @@
       <i class="bi bi-file-bar-graph"></i>
       <span>Reportes de Tickets</span>
     </h1>
-    <div class="d-flex gap-2">
-      <a id="btnExportCsv" class="btn btn-outline-secondary btn-sm btn-ripple" href="#">
-        <i class="bi bi-download"></i> Exportar CSV
-      </a>
-    </div>
+    <a id="btnExportCsv" class="btn btn-outline-secondary btn-sm btn-ripple">
+      <i class="bi bi-download"></i> Exportar CSV
+    </a>
   </div>
 </div>
 
 <!-- FILTROS -->
 <div class="glass mb-3">
   <form id="filters" class="row g-2 align-items-end">
-    <div class="col-12 col-md-2">
+    <div class="col-md-2">
       <label class="form-label">Estado</label>
       <select name="state" class="form-select form-select-sm">
         {% for val,label in states %}
@@ -86,22 +74,22 @@
       </select>
     </div>
 
-    <div class="col-12 col-md-3">
+    <div class="col-md-3">
       <label class="form-label">Texto</label>
       <input name="q" class="form-control form-control-sm" placeholder="Título o descripción">
     </div>
 
-    <div class="col-6 col-md-2">
+    <div class="col-md-2">
       <label class="form-label">Desde</label>
       <input name="date_from" type="date" class="form-control form-control-sm">
     </div>
 
-    <div class="col-6 col-md-2">
+    <div class="col-md-2">
       <label class="form-label">Hasta</label>
       <input name="date_to" type="date" class="form-control form-control-sm">
     </div>
 
-    <div class="col-12 col-md-2">
+    <div class="col-md-2">
       <label class="form-label">Asignado</label>
       <select name="assignee" class="form-select form-select-sm">
         <option value="">Todos</option>
@@ -111,7 +99,7 @@
       </select>
     </div>
 
-    <div class="col-12 col-md-1 text-end">
+    <div class="col-md-1 text-end">
       <button class="btn btn-outline-secondary btn-sm btn-ripple w-100" type="submit">Filtrar</button>
     </div>
   </form>
@@ -137,40 +125,59 @@
   </div>
 </div>
 
-<!-- TABLA PRINCIPAL CON SCROLL -->
+<!-- TABLA TICKETS -->
 <div class="glass mt-3">
-
   <div class="report-scroll table-responsive">
-
     <table class="table table-hover align-middle mb-0">
       <thead class="table-light">
         <tr>
-          <th style="width:80px">ID</th>
+          <th>ID</th>
           <th>Título</th>
-          <th style="width:140px">Estado</th>
-          <th style="width:160px">Asignado</th>
-          <th style="width:160px">Creado</th>
+          <th>Estado</th>
+          <th>Asignado</th>
+          <th>Creado</th>
         </tr>
       </thead>
       <tbody id="rows">
         <tr><td colspan="5" class="text-center text-muted py-4">Sin datos</td></tr>
       </tbody>
     </table>
+  </div>
+</div>
 
-  </div><!-- report-scroll -->
-
-</div><!-- glass -->
-
-<!-- MÉTRICAS DE FAQ CON SCROLL -->
+<!-- RANKING TÉCNICOS -->
 <div class="glass mt-4">
+  <h5 class="mb-3 d-flex align-items-center gap-2">
+    <i class="bi bi-trophy text-warning"></i>
+    Ranking de Técnicos
+  </h5>
 
+  <div class="report-scroll">
+    <table class="table table-hover mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Técnico</th>
+          <th>Asignados</th>
+          <th>Resueltos</th>
+          <th>Tasa cierre</th>
+          <th>Promedio resolución</th>
+        </tr>
+      </thead>
+      <tbody id="techRankingRows">
+        <tr><td colspan="5" class="text-center text-muted py-3">Cargando ranking…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- MÉTRICAS FAQ -->
+<div class="glass mt-4">
   <h5 class="mb-3">
     <i class="bi bi-question-diamond text-primary"></i>
     Métricas de FAQ
   </h5>
 
   <div class="report-scroll">
-
     <table class="table table-hover mb-0">
       <thead class="table-light">
         <tr>
@@ -186,11 +193,8 @@
         <tr><td colspan="6" class="text-center text-muted">Cargando métricas…</td></tr>
       </tbody>
     </table>
-
-  </div><!-- report-scroll -->
-
-</div><!-- glass -->
-
+  </div>
+</div>
 
 {% endblock %}
 
@@ -200,152 +204,150 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const form = document.getElementById("filters");
   const rows = document.getElementById("rows");
+  const techRanking = document.getElementById("techRankingRows");
+  const faqRows = document.getElementById("faqReportRows");
   const totalCount = document.getElementById("totalCount");
   const btnExportCsv = document.getElementById("btnExportCsv");
-  const faqRows = document.getElementById("faqReportRows");
 
   const chartStateCtx = document.getElementById("chartState");
   const chartMonthCtx = document.getElementById("chartMonth");
   let chartState = null, chartMonth = null;
 
-  /* ============================================================
-        UTILIDAD PARA OBTENER PARÁMETROS DEL FORM
-  ============================================================ */
+  /* =========================================
+        Obtener parámetros del formulario
+  ========================================= */
   function qsParams(){
     const fd = new FormData(form);
     const p = new URLSearchParams();
     for(const [k,v] of fd.entries()){
-      if(v !== null && v !== "") p.append(k,v);
+      if(v) p.append(k,v);
     }
     return p.toString();
   }
 
-  /* ============================================================
-        REDIRECCIONAR AL HACER CLICK EN FILAS DE TICKETS
-  ============================================================ */
-  document.addEventListener("click", function(e){
-    const row = e.target.closest("tr[data-ticket]");
-    if (!row) return;
-    const ticketId = row.dataset.ticket;
-    window.location.assign(`/tickets/${ticketId}/`);
-  });
-
-  /* ============================================================
-        CLICK EN FILAS DE MÉTRICA FAQ → IR AL FAQ
-  ============================================================ */
-  document.addEventListener("click", function (e) {
-      const faqRow = e.target.closest("tr[data-faq]");
-      if (!faqRow) return;
-
-      const faqId = faqRow.dataset.faq;
-      window.location.assign(`/faq/${faqId}/`);
-  });
-
-  /* ============================================================
-        CARGAR TABLA, GRÁFICOS, CONTADORES
-  ============================================================ */
+  /* =========================================
+        Cargar todos los reportes
+  ========================================= */
   async function loadData(){
-    rows.innerHTML =
-      '<tr><td colspan="5" class="text-center text-muted py-4">Cargando…</td></tr>';
+
+    rows.innerHTML = `
+      <tr><td colspan="5" class="text-center text-muted py-4">Cargando...</td></tr>
+    `;
 
     const url = "{% url 'reports_data' %}?" + qsParams();
     const r = await fetch(url);
-
     if(!r.ok){
-      rows.innerHTML =
-        '<tr><td colspan="5" class="text-center text-danger py-4">Error cargando datos</td></tr>';
+      rows.innerHTML = `
+        <tr><td colspan="5" class="text-center text-danger py-4">Error cargando datos</td></tr>
+      `;
       return;
     }
 
     const j = await r.json();
 
-    /* -------- TABLA PRINCIPAL DE TICKETS -------- */
-    if(!j.rows || !j.rows.length){
-      rows.innerHTML =
-        '<tr><td colspan="5" class="text-center text-muted py-4">Sin resultados</td></tr>';
+    /* ---------------- TABLA PRINCIPAL ---------------- */
+    if(!j.rows.length){
+      rows.innerHTML = `
+        <tr><td colspan="5" class="text-center text-muted py-4">Sin datos</td></tr>
+      `;
     } else {
       rows.innerHTML = j.rows.map(t => `
         <tr data-ticket="${t.id}">
           <td>${t.id}</td>
-          <td>${t.title || '—'}</td>
-          <td>${t.state || '—'}</td>
-          <td>${t.assigned || '—'}</td>
-          <td>${t.created_at || '—'}</td>
+          <td>${t.title}</td>
+          <td>${t.state}</td>
+          <td>${t.assigned}</td>
+          <td>${t.created_at}</td>
         </tr>
       `).join("");
     }
 
-    totalCount.textContent = j.total ?? 0;
+    totalCount.textContent = j.total || 0;
 
-    /* ============================================
-          GRÁFICO DE ESTADOS (DOUGHNUT)
-    ============================================ */
-    const labelsState = ["open","in_progress","resolved","closed"];
+    /* -------- CLICK EN PORCIÓN DEL GRÁFICO DONUT -------- */
+chartStateCtx.onclick = function(evt){
+    const points = chartState.getElementsAtEventForMode(
+        evt,
+        "nearest",
+        { intersect: true },
+        false
+    );
+
+    if (!points.length) return;
+
+    const index = points[0].index;
+    const label = chartState.data.labels[index];
+
+    // Mapa de etiquetas bonitas → códigos reales
+    const stateMap = {
+        "Abiertos": "open",
+        "En progreso": "in_progress",
+        "Resueltos": "resolved",
+        "Cerrados": "closed"
+    };
+
+    const code = stateMap[label];
+    if (!code) return;
+
+    // REDIRECCIONAR
+    window.location.assign(`/tickets/estado/${code}/`);
+};
+
+
+    /* ---------------- RANKING DE TÉCNICOS ---------------- */
+    if(j.tech_table && j.tech_table.length){
+      techRanking.innerHTML = j.tech_table.map(t => {
+        const pct = t.total_assigned
+          ? ((t.resolved / t.total_assigned) * 100).toFixed(1) + "%"
+          : "-";
+        const avg = t.avg_resolution
+          ? (t.avg_resolution / 60).toFixed(1) + " min"
+          : "-";
+
+        return `
+          <tr>
+            <td>${t.username}</td>
+            <td>${t.total_assigned}</td>
+            <td>${t.resolved}</td>
+            <td>${pct}</td>
+            <td>${avg}</td>
+          </tr>
+        `;
+      }).join("");
+    } else {
+      techRanking.innerHTML = `
+        <tr><td colspan="5" class="text-center text-muted py-3">Sin datos</td></tr>
+      `;
+    }
+
+    /* ---------------- GRÁFICO ESTADOS ---------------- */
     const pretty = {
       open: "Abiertos",
       in_progress: "En progreso",
       resolved: "Resueltos",
-      closed: "Cerrados",
+      closed: "Cerrados"
     };
-    const dataState = labelsState.map(k => j.by_state?.[k] || 0);
+
+    const labels = Object.keys(pretty);
+    const dataState = labels.map(k => j.by_state?.[k] || 0);
 
     if(chartState) chartState.destroy();
     chartState = new Chart(chartStateCtx, {
       type: "doughnut",
-      plugins: (typeof ChartDataLabels !== "undefined") ? [ChartDataLabels] : [],
+      plugins: typeof ChartDataLabels !== "undefined" ? [ChartDataLabels] : [],
       data: {
-        labels: labelsState.map(k => pretty[k]),
+        labels: labels.map(k => pretty[k]),
         datasets: [{
           data: dataState,
           backgroundColor: ["#0d6efd","#0dcaf0","#198754","#6c757d"]
         }]
       },
-      options: {
-        responsive: true,
-        plugins: {
-          legend: { position: "bottom" },
-          datalabels: {
-            color: "#000",
-            font: { weight: "bold", size: 12 },
-            formatter: value => value
-          }
-        }
-      }
+      options: { plugins:{ legend:{ position:"bottom" } } }
     });
 
-    /* -------- CLICK EN PORCIÓN DEL GRÁFICO -------- */
-    chartStateCtx.onclick = function(evt){
-      const points = chartState.getElementsAtEventForMode(
-        evt,
-        "nearest",
-        { intersect: true },
-        false
-      );
-
-      if (!points.length) return;
-
-      const index = points[0].index;
-      const label = chartState.data.labels[index];
-
-      const stateMap = {
-        "Abiertos": "open",
-        "En progreso": "in_progress",
-        "Resueltos": "resolved",
-        "Cerrados": "closed"
-      };
-
-      const code = stateMap[label];
-      if (!code) return;
-
-      window.location.assign(`/tickets/estado/${code}/`);
-    };
-
-    /* ============================================
-          GRÁFICO DE TICKETS POR MES
-    ============================================ */
-    const byMonth = j.by_month || {};
-    const labelsMonth = Object.keys(byMonth);
-    const dataMonth = labelsMonth.map(k => byMonth[k] || 0);
+    /* ---------------- GRÁFICO POR MES ---------------- */
+    const labelsMonth = Object.keys(j.by_month || {});
+    const dataMonth = labelsMonth.map(k => j.by_month[k]);
 
     if(chartMonth) chartMonth.destroy();
     chartMonth = new Chart(chartMonthCtx, {
@@ -354,82 +356,70 @@ document.addEventListener("DOMContentLoaded", () => {
         labels: labelsMonth,
         datasets: [{
           data: dataMonth,
-          tension: .3,
+          tension: 0.3,
           borderColor: "#0d6efd",
           backgroundColor: "#0d6efd"
         }]
       },
-      options: {
-        responsive: true,
-        plugins: { legend: { display:false } },
-        scales: {
-          x: { display: true },
-          y: { display: true, beginAtZero: true }
-        }
-      }
+      options: { plugins:{ legend:{ display:false } } }
     });
 
+    /* ---------------- EXPORT CSV ---------------- */
     btnExportCsv.href = "{% url 'reports_export_csv' %}?" + qsParams();
   }
 
-  /* ============================================================
-        CARGAR MÉTRICAS DE FAQ (TABLA DE ABAJO)
-  ============================================================ */
-  async function loadFAQMetrics(){
+
+  /* =========================================
+        MÉTRICAS FAQ
+  ========================================= */
+  async function loadFAQ(){
+
     faqRows.innerHTML =
-      '<tr><td colspan="6" class="text-center text-muted">Cargando métricas…</td></tr>';
+      '<tr><td colspan="6" class="text-center text-muted">Cargando…</td></tr>';
 
-    try{
-      const access = localStorage.getItem("access_token");
-      const headers = access ? { Authorization: "Bearer " + access } : {};
-      const r = await fetch("/reportes/faq/", { headers });
+    const r = await fetch("/reportes/faq/");
+    if(!r.ok){
+      faqRows.innerHTML =
+        '<tr><td colspan="6" class="text-danger text-center">Error</td></tr>';
+      return;
+    }
 
-      if(!r.ok){
-        faqRows.innerHTML =
-          '<tr><td colspan="6" class="text-center text-danger">Error al cargar métricas</td></tr>';
-        return;
-      }
-
-      const data = await r.json();
-      if(!data.length){
-        faqRows.innerHTML =
-          '<tr><td colspan="6" class="text-center text-muted">Sin información de FAQ</td></tr>';
-        return;
-      }
-
-      faqRows.innerHTML = data.map(item => `
-    <tr data-faq="${item.id}">
+    const data = await r.json();
+    faqRows.innerHTML = data.map(item => `
+      <tr data-faq="${item.id}">
         <td>${item.question}</td>
         <td>${item.category__name}</td>
         <td><span class="badge text-bg-success">${item.utiles}</span></td>
         <td><span class="badge text-bg-danger">${item.no_utiles}</span></td>
         <td>${item.total}</td>
         <td><strong>${item.utilidad_pct}%</strong></td>
-    </tr>
-  `).join("");
-
-    }catch(err){
-      console.error("FAQ METRICS ERROR:", err);
-      faqRows.innerHTML =
-        '<tr><td colspan="6" class="text-center text-danger">Error al cargar métricas</td></tr>';
-    }
+      </tr>
+    `).join("");
   }
 
-  /* ============================================================
-        FILTROS
-  ============================================================ */
+
+  /* =========================================
+        EVENTOS
+  ========================================= */
   form.addEventListener("submit", e => {
     e.preventDefault();
     loadData();
   });
 
-  /* ============================================================
+  document.addEventListener("click", e => {
+    const row = e.target.closest("tr[data-ticket]");
+    if(row){
+      window.location.href = `/tickets/${row.dataset.ticket}/`;
+    }
+  });
+
+  /* =========================================
         INICIALIZACIÓN
-  ============================================================ */
+  ========================================= */
   loadData();
-  loadFAQMetrics();
+  loadFAQ();
 
 });
-
 </script>
+
 {% endblock %}
