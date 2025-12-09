@@ -66,14 +66,15 @@
         </select>
       </div>
       <div class="col-12 col-md-2">
-        <label class="form-label">Prioridad</label>
+      <label class="form-label">Prioridad</label>
         <select name="priority" class="form-select">
-          <option value="">Todas</option>
-          <option value="low">Baja</option>
-          <option value="medium">Media</option>
-          <option value="high">Alta</option>
-        </select>
-      </div>
+        <option value="">Todas</option>
+        {% for p in priorities %}
+          <option value="{{ p.code }}">{{ p.name }}</option>
+        {% endfor %}
+      </select>
+
+    </div>
       <div class="col-12">
         <button class="btn btn-primary btn-sm btn-ripple" type="submit">
           <i class="bi bi-funnel"></i> Aplicar filtros

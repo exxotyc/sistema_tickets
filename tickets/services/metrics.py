@@ -9,7 +9,7 @@ from django.db.models import Count, QuerySet, F, ExpressionWrapper, DurationFiel
 from django.utils.timezone import now
 
 from ..models import Comment, Ticket, TicketLog, Priority
-from ..services.sla import calculate_sla_status  # 👈 SLA real
+from ..services.sla import calculate_sla_status  # SLA real
 
 __all__ = [
     "TicketMetricsService",
@@ -29,20 +29,23 @@ class TicketMetricsService:
         self._comments_by_ticket: Optional[Dict[int, List[Comment]]] = None
 
         # ===========================================================
-        # PRIORIDADES P1 — SOLO USANDO CAMPOS REALES: code + name
+        # PRIORIDAD CRÍTICA (P1)
+        # Detecta correctamente:
+        #   code = "critical"
+        #   name = "Crítica"
         # ===========================================================
-        posibles_p1 = ["critical", "high", "alta", "critica", "p1"]
+        posibles_codes = ["critical"]
+        posibles_names = ["Crítica"]
 
-        # Buscar coincidencias REALES en Priority
         ids_por_code = list(
-            Priority.objects.filter(code__in=posibles_p1).values_list("id", flat=True)
+            Priority.objects.filter(code__in=posibles_codes).values_list("id", flat=True)
         )
 
         ids_por_name = list(
-            Priority.objects.filter(name__in=posibles_p1).values_list("id", flat=True)
+            Priority.objects.filter(name__in=posibles_names).values_list("id", flat=True)
         )
 
-        # Unir IDs válidos
+        # IDs que representan prioridades críticas
         self.P1_PRIORITIES = list(set(ids_por_code + ids_por_name))
 
     # ------------------------------
@@ -58,6 +61,9 @@ class TicketMetricsService:
     def ticket_ids(self) -> List[int]:
         return [ticket.id for ticket in self.tickets]
 
+    # ------------------------------
+    # MÉTRICAS PRINCIPALES
+    # ------------------------------
     def summarize(self) -> Dict[str, object]:
         """Devuelve KPIs resumidos del queryset, incluyendo SLA, MTTR y FRT."""
 
@@ -68,7 +74,7 @@ class TicketMetricsService:
 
         total = sum(state_counts.values())
 
-        # --- Count P1 (solo IDs válidos)
+        # --- Conteo de tickets críticos (P1)
         p1_count = (
             self.queryset.filter(priority_id__in=self.P1_PRIORITIES).count()
             if self.P1_PRIORITIES else 0
@@ -117,10 +123,10 @@ class TicketMetricsService:
         return {
             "total": total,
             "by_state": state_counts,
-            "critical": p1_count,               # cantidad P1
+            "critical": p1_count,               # cantidad P1 (Crítica)
             "mttr_hours": mttr_hours,          # tiempo de resolución promedio
             "frt_hours": frt_hours,            # tiempo de primera respuesta
-            "sla_compliance": sla_compliance,  # SLA %
+            "sla_compliance": sla_compliance,  # % SLA cumplido
             "sla_in_time": sla_ok,
             "sla_risk": sla_risk,
             "sla_breached": sla_breached,
@@ -142,20 +148,24 @@ class TicketMetricsService:
     def first_response_at(self, ticket: Ticket) -> Optional[Tuple[str, object]]:
         requester_id = ticket.requester_id
 
+        # Primer comentario de alguien que no sea el solicitante
         for comment in self._comments_for_ticket(ticket.id):
             if comment.user_id and comment.user_id != requester_id:
                 return ("comment", comment)
 
+        # Primer log de alguien que no sea el solicitante
         for log in self._logs_for_ticket(ticket.id):
             if log.user_id and log.user_id != requester_id:
                 return ("log", log)
 
         return None
 
+    # Generador de métricas por ticket
     def per_ticket_metrics(self) -> Iterator[Tuple[Ticket, Optional[TicketLog], Optional[Tuple[str, object]]]]:
         for ticket in self.tickets:
             yield ticket, self.first_resolution_at(ticket), self.first_response_at(ticket)
 
+    # Diferencia en minutos
     def minutes_between(self, start, end) -> Optional[float]:
         if not start or not end:
             return None
@@ -163,7 +173,7 @@ class TicketMetricsService:
         return round(delta.total_seconds() / 60.0, 2)
 
     # ------------------------------
-    # Internals
+    # Internos
     # ------------------------------
     def _logs_for_ticket(self, ticket_id: int) -> Sequence[TicketLog]:
         if self._logs_by_ticket is None:

@@ -45,10 +45,14 @@ def _dispatch(event: str, ticket, context: dict) -> None:
     _send_email(event, ticket, context)
     _send_webhook(event, ticket, context)
 
+
 # ------------------------
 #   IN-APP NOTIFICATIONS
 # ------------------------
 def create_inapp_notification(user, ticket, type, title, message):
+    """
+    Crea una notificación interna básica.
+    """
     from tickets.models import Notification
     Notification.objects.create(
         user=user,
@@ -57,7 +61,6 @@ def create_inapp_notification(user, ticket, type, title, message):
         title=title,
         message=message,
     )
-
 
 
 def _send_email(event: str, ticket, context: dict) -> None:
@@ -112,7 +115,7 @@ def notify_ticket_created(ticket) -> bool:
         ticket,
         "created",
         f"Ticket #{ticket.pk} creado",
-        f"Se ha creado el ticket #{ticket.pk}: {ticket.title}"
+        f"Se ha creado el ticket #{ticket.pk}: {ticket.title}",
     )
     return _notify(
         "ticket_created",
@@ -125,25 +128,25 @@ def notify_ticket_created(ticket) -> bool:
     )
 
 
-
 def notify_ticket_state_change(ticket, previous: str, new: str, user=None) -> bool:
     username = getattr(user, "username", None)
 
-    # Notificación interna
+    # Notificación interna al solicitante
     create_inapp_notification(
         ticket.requester,
         ticket,
         "state_changed",
         f"Ticket #{ticket.pk} cambió a {new}",
-        f"Estado: {previous} → {new}"
+        f"Estado: {previous} → {new}",
     )
+    # Y al técnico asignado (si existe)
     if ticket.assigned_to:
         create_inapp_notification(
             ticket.assigned_to,
             ticket,
             "state_changed",
             f"Ticket #{ticket.pk} cambió a {new}",
-            f"Estado: {previous} → {new}"
+            f"Estado: {previous} → {new}",
         )
 
     return _notify(
@@ -161,8 +164,6 @@ def notify_ticket_state_change(ticket, previous: str, new: str, user=None) -> bo
 
 
 def notify_sla_risk(ticket, due_at) -> bool:
-    from tickets.notifications import create_inapp_notification
-
     # 🔔 Notificación interna para el técnico asignado
     if ticket.assigned_to:
         create_inapp_notification(
@@ -170,13 +171,11 @@ def notify_sla_risk(ticket, due_at) -> bool:
             ticket,
             "sla_risk",
             f"SLA en riesgo · Ticket #{ticket.pk}",
-            f"El ticket vence pronto ({due_at})."
+            f"El ticket vence pronto ({due_at}).",
         )
 
-    # Para evitar duplicados en deduplicación
     suffix = due_at.isoformat() if due_at else None
 
-    # 📧 Notificación por correo / webhook
     return _notify(
         "ticket_sla_risk",
         ticket,
@@ -188,4 +187,45 @@ def notify_sla_risk(ticket, due_at) -> bool:
             "due_at": due_at.isoformat() if due_at else None,
         },
         key_suffix=suffix,
+    )
+
+
+# =====================================================
+# NOTIFICACIÓN: Ticket asignado
+# =====================================================
+def notify_ticket_assigned(ticket, technician, by_user=None):
+    """
+    Notificación cuando un ticket es asignado a un técnico.
+    """
+    # Notificación interna al técnico
+    create_inapp_notification(
+        technician,
+        ticket,
+        "assigned",
+        f"Nuevo ticket asignado #{ticket.pk}",
+        f"Se te ha asignado el ticket #{ticket.pk}: {ticket.title}",
+    )
+
+    # Opcional: también al solicitante si quieres
+    create_inapp_notification(
+        ticket.requester,
+        ticket,
+        "assigned",
+        f"Ticket #{ticket.pk} asignado",
+        f"Tu ticket #{ticket.pk} fue asignado a {technician.username}.",
+    )
+
+    # Opcional: correo / webhook de asignación
+    return _notify(
+        "ticket_assigned",
+        ticket,
+        {
+            "subject": f"Ticket #{ticket.pk} asignado",
+            "message": (
+                f"El ticket #{ticket.pk} fue asignado a {technician.username}."
+            ),
+            "assigned_to": technician.username,
+            "by": getattr(by_user, "username", None),
+        },
+        key_suffix=str(technician.pk),
     )

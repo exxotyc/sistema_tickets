@@ -399,111 +399,144 @@ function showToast(message, type="error") {
 }
 
 // =====================================================
-//   HELPERS
+//   HELPERS GLOBALES PARA API
+//   - JWT Access Token
+//   - Refresh automático
+//   - CSRF Token
+//   - JSON y FormData
 // =====================================================
 
-// Usa SIEMPRE el cliente API universal del base.html
-// Maneja: CSRF, JWT, Refresh automático, JSON, FormData
-async function api(url, opts = {}) {
-  const headers = opts.headers || {};
-  const access = localStorage.getItem("access_token");
-
-  // Autenticación
-  if (access) headers["Authorization"] = "Bearer " + access;
-
-  // CSRF sólo si es JSON y método escrito
-  const isWrite = ["POST","PUT","PATCH","DELETE"].includes((opts.method || "").toUpperCase());
-  const isForm = opts.body instanceof FormData;
-
-  if (isWrite) {
-    if (!isForm) {
-        headers["Content-Type"] = "application/json";
-    }
-    headers["X-CSRFToken"] = getCookie("csrftoken");
-}
-
-  const finalOpts = { ...opts, headers };
-
-  let r = await fetch(url, finalOpts);
-
-  // Si expira → refrescar token
-  if (r.status === 401) {
-    const newT = await refreshToken();
-    if (newT) {
-      finalOpts.headers["Authorization"] = "Bearer " + newT;
-      r = await fetch(url, finalOpts);
-    }
-  }
-
-  return r;
-}
-
-// Obtener cookie CSRF
-function getCookie(name){
-    const m=document.cookie.match('(^|;)\\s*'+name+'\\s*=\\s*([^;]+)');
+// ------------------------------------------
+// Obtener cookie (para CSRF de Django)
+// ------------------------------------------
+function getCookie(name) {
+    const m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
     return m ? m.pop() : "";
 }
 
-// refreshToken() idéntico al base.html
-async function refreshToken(){
+// ------------------------------------------
+// REFRESH TOKEN — Igual que base.html
+// ------------------------------------------
+async function refreshToken() {
     const refresh = localStorage.getItem("refresh_token");
-    if(!refresh) return null;
+    if (!refresh) return null;
 
     const r = await fetch("/api/token/refresh/", {
-        method:"POST",
-        credentials:"include",
-        headers:{
-            "Content-Type":"application/json",
+        method: "POST",
+        credentials: "include",
+        headers: {
+            "Content-Type": "application/json",
             "X-CSRFToken": getCookie("csrftoken"),
         },
         body: JSON.stringify({ refresh })
     });
 
-    if(!r.ok) return null;
+    if (!r.ok) return null;
+
     const data = await r.json();
     localStorage.setItem("access_token", data.access);
     return data.access;
 }
 
-// Utilidades
-function esc(s){
-  return String(s || "").replace(/[&<>"']/g, m => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    "\"":"&quot;",
-    "'": "&#39;"
-  }[m]));
+// ------------------------------------------
+// CLIENTE API PRINCIPAL (universal)
+// ------------------------------------------
+async function api(url, opts = {}) {
+    const headers = opts.headers || {};
+    const access = localStorage.getItem("access_token");
+
+    // JWT si existe
+    if (access) headers["Authorization"] = "Bearer " + access;
+
+    const method = (opts.method || "").toUpperCase();
+    const isWrite = ["POST", "PUT", "PATCH", "DELETE"].includes(method);
+    const isForm = opts.body instanceof FormData;
+
+    // Agregar CSRF si es escritura
+    if (isWrite) {
+        if (!isForm) headers["Content-Type"] = "application/json";
+        headers["X-CSRFToken"] = getCookie("csrftoken");
+    }
+
+    const finalOpts = { ...opts, headers };
+
+    let r = await fetch(url, finalOpts);
+
+    // Si expiró JWT → refrescar y reintentar
+    if (r.status === 401) {
+        const newT = await refreshToken();
+        if (newT) {
+            finalOpts.headers["Authorization"] = "Bearer " + newT;
+            r = await fetch(url, finalOpts);
+        }
+    }
+
+    return r;
 }
 
-function fmt(d){
-  return d ? new Date(d).toLocaleString() : "-";
+// ------------------------------------------
+// Obtener JSON con manejo automático JWT
+// ------------------------------------------
+async function getJSON(url) {
+    const r = await api(url);
+    if (!r.ok) return null;
+    return r.json();
 }
 
-async function getJSON(url){
-  const r = await api(url);
-  if(!r.ok) return null;
-  return r.json();
+// ------------------------------------------
+// ENVÍO JSON — Compatible con CSRF + JWT
+// ------------------------------------------
+async function sendJSON(url, method = "POST", data = {}) {
+    const headers = {
+        "Content-Type": "application/json",
+        "X-CSRFToken": getCookie("csrftoken"),
+        ...(window.apiAuthHeaders || {}),
+    };
+
+    const r = await fetch(url, {
+        method,
+        headers,
+        body: JSON.stringify(data),
+        credentials: "include"
+    });
+
+    let json = {};
+    try { json = await r.json(); } catch (_) {}
+
+    if (!r.ok) {
+        return {
+            ok: false,
+            error: json.detail || json.error || "Error desconocido",
+            data: json,
+            status: r.status
+        };
+    }
+
+    return {
+        ok: true,
+        data: json,
+        status: r.status
+    };
 }
 
-async function sendJSON(url, method, body){
-  const r = await api(url,{
-    method,
-    body: JSON.stringify(body)
-  });
-
-  if(!r.ok){
-    let msg="Error";
-    try{ 
-      const j = await r.json(); 
-      msg = j.detail || j.error || JSON.stringify(j);
-    }catch{}
-    return { ok:false, error:msg };
-  }
-
-  const data = await r.json().catch(()=>null);
-  return { ok:true, data };
+// ------------------------------------------
+// UTILIDADES
+// ------------------------------------------
+function esc(s) {
+    return String(s || "").replace(/[&<>"']/g, m => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        "\"": "&quot;",
+        "'": "&#39;"
+    }[m]));
 }
+
+function fmt(d) {
+    return d ? new Date(d).toLocaleString() : "-";
+}
+
+
 
 // =====================================================
 //   PRIORIDADES
@@ -904,49 +937,71 @@ async function saveMeta(state, priority) {
 }
 
 // =====================================================
-//   ASIGNACIÓN
+//   ASIGNACIÓN DE TICKET (funcionando 100%)
 // =====================================================
-async function assignTicketTo(userId){
-  const msg=document.getElementById("assignMsg");
-  if(!userId){
-    msg.textContent="Debes seleccionar un técnico.";
-    msg.className="form-text text-danger";
-    return;
-  }
+async function assignTicketTo(userId) {
+    const msg = document.getElementById("assignMsg");
 
-const res = await sendJSON(`/api/tickets/${TICKET_ID}/assign/`,"POST",{ assigned_to:Number(userId) });
-  if(!res.ok){
-    msg.textContent=res.error;
-    msg.className="form-text text-danger";
-    return;
-  }
+    console.log("➡ assignTicketTo() → userId recibido:", userId);
 
-  msg.textContent=`Asignado a ${res.data.assigned_to}`;
-  msg.className="form-text text-success";
+    if (!userId || userId === "null" || userId === "undefined") {
+        msg.textContent = "Debes seleccionar un técnico.";
+        msg.className = "form-text text-danger small";
+        return;
+    }
 
-  await loadTicket();
-  await loadHistory();
+    const payload = { user_id: Number(userId) }; // 🔥 CORREGIDO
+    console.log("➡ Payload enviado:", payload);
+
+    const res = await sendJSON(
+        `/api/tickets/${TICKET_ID}/assign/`,
+        "POST",
+        payload
+    );
+
+    console.log("➡ Respuesta backend:", res);
+
+    if (!res.ok) {
+        msg.textContent = res.error || "Error al asignar.";
+        msg.className = "form-text text-danger small";
+        return;
+    }
+
+    msg.textContent = `Asignado correctamente.`;
+    msg.className = "form-text text-success small";
+
+    await loadTicket();
+    await loadHistory();
 }
 
-document.addEventListener("DOMContentLoaded",()=>{
-  const btn=document.getElementById("btnAssign");
-  if(btn){
-    btn.onclick=()=>{
-      const sel=document.getElementById("techSelect");
-      assignTicketTo(sel.value);
-    };
-  }
+
+
+// ------------------------------
+//   Botón "Asignar"
+// ------------------------------
+document.addEventListener("DOMContentLoaded", () => {
+    const btn = document.getElementById("btnAssign");
+    if(btn){
+        btn.onclick = () => {
+            const sel = document.getElementById("techSelect");
+            assignTicketTo(sel.value);
+        };
+    }
 });
 
-document.addEventListener("DOMContentLoaded",()=>{
-  const btn=document.getElementById("btnTakeTicket");
-  if(btn){
-    btn.onclick=async ()=>{
-      if(!CURRENT_USER) return;
-      await assignTicketTo(CURRENT_USER.id);
-    };
-  }
+// ------------------------------
+//   Botón "Tomar ticket"
+// ------------------------------
+document.addEventListener("DOMContentLoaded", () => {
+    const btn = document.getElementById("btnTakeTicket");
+    if(btn){
+        btn.onclick = async () => {
+            if(!CURRENT_USER) return;
+            await assignTicketTo(CURRENT_USER.id);
+        };
+    }
 });
+
 
 // =====================================================
 //   PERMISOS UI

@@ -259,17 +259,14 @@ class FAQViewSet(viewsets.ModelViewSet):
 
 
 # ================================
-#   TICKET VIEWSET CORREGIDO
-# ================================
-# ================================
-#   TICKET VIEWSET CORREGIDO
+#   TICKET VIEWSET CORREGIDO COMPLETO
 # ================================
 class TicketViewSet(viewsets.ModelViewSet):
     """
     ViewSet para gestionar Tickets:
     - admin: ve y edita todos
-    - técnico: ve sus propios asignados
-    - usuario: solo sus propios tickets (y SOLO puede editar título/descripcion)
+    - técnico: ve todos pero solo modifica los asignados
+    - usuario: solo sus propios tickets (solo puede editar título y descripción)
     """
     serializer_class = TicketSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -293,43 +290,43 @@ class TicketViewSet(viewsets.ModelViewSet):
             "priority"
         ).order_by("-created_at")
 
-        # Admin ve todo
         if user.groups.filter(name="admin").exists():
             return qs
 
-        # Técnico ve todo
         if user.groups.filter(name="tecnico").exists():
             return qs
 
-        # Usuario → solo sus tickets
         return qs.filter(requester=user)
 
     # ------------------------------------------------------
-    # CREAR TICKET
+    # CREAR TICKET (con SLA inicial)
     # ------------------------------------------------------
     def perform_create(self, serializer):
+        from tickets.services.sla import compute_due_at
+
         user = self.request.user
+        area = getattr(user.profile, "area", None)
 
-        # Heredar área del usuario
-        area = None
-        if hasattr(user, "profile") and user.profile.area:
-            area = user.profile.area
-
-        return serializer.save(
+        ticket = serializer.save(
             requester=user,
             area=area,
         )
-    
+
+        # Asignar fecha límite (SLA)
+        if ticket.priority:
+            ticket.resolve_due_at = compute_due_at(ticket.created_at, ticket.priority)
+            ticket.save(update_fields=["resolve_due_at"])
+
+        return ticket
 
     # ------------------------------------------------------
-    # ASIGNAR TICKET A UN TÉCNICO
-    # URL: POST /api/tickets/<id>/assign/
+    # ACCIÓN: ASIGNAR TICKET
     # ------------------------------------------------------
     @action(detail=True, methods=["post"], url_path="assign")
     def assign_ticket(self, request, pk=None):
         user = request.user
 
-        # Solo admin y técnico pueden asignar tickets
+        # Solo admin o técnico pueden asignar
         if not user.groups.filter(name__in=["admin", "tecnico"]).exists():
             return Response({"detail": "No autorizado."}, status=403)
 
@@ -347,7 +344,7 @@ class TicketViewSet(viewsets.ModelViewSet):
         ticket.assigned_to = tech
         ticket.save()
 
-        # Log opcional
+        # Log
         TicketLog.objects.create(
             ticket=ticket,
             user=user,
@@ -358,118 +355,82 @@ class TicketViewSet(viewsets.ModelViewSet):
         return Response({"ok": True, "msg": "Ticket asignado correctamente."})
 
     # ------------------------------------------------------
-    # UPDATE / PARTIAL UPDATE
-    # Usuarios solo pueden modificar título y descripción
+    # PATCH — CONTROL DE PERMISOS + SLA UPDATE
     # ------------------------------------------------------
     def partial_update(self, request, *args, **kwargs):
+        from tickets.services.sla import compute_due_at
+
         ticket = self.get_object()
         user = request.user
 
         is_admin = user.groups.filter(name="admin").exists()
         is_tech = user.groups.filter(name="tecnico").exists()
+        is_owner = (ticket.requester == user)
 
-        # ==========================================
-        # 1) SOLICITANTE → SOLO title/description
-        # ==========================================
-        if user == ticket.requester and not (is_admin or is_tech):
+        old_priority = ticket.priority_id
 
-            allowed_fields = {"title", "description"}
+        # =====================================================
+        # 1) USUARIO SOLICITANTE → solo title / description
+        # =====================================================
+        if is_owner and not (is_admin or is_tech):
+
+            allowed = {"title", "description"}
 
             for field, value in request.data.items():
-
-                # Ignorar datos vacíos (PATCH estándar)
-                if value in [None, "", [], {}, "null"]:
+                if value in [None, "", "null", [], {}]:
                     continue
 
-                # Si intenta modificar un campo que NO está permitido → bloquear
-                if field not in allowed_fields:
+                if field not in allowed:
                     return Response(
                         {"detail": f"No autorizado para modificar '{field}'."},
                         status=403
                     )
 
-            # Si todo es válido → permitir PATCH normal
+            # Permitir PATCH normal
             return super().partial_update(request, *args, **kwargs)
 
-        # ==========================================
-        # 2) ADMIN → puede editar TODO
-        # ==========================================
-        if is_admin:
-            return super().partial_update(request, *args, **kwargs)
+        # =====================================================
+        # 2) TÉCNICO → puede editar solo si le pertenece
+        # =====================================================
+        if is_tech and ticket.assigned_to != user:
+            return Response(
+                {"detail": "No puedes modificar tickets que no te fueron asignados."},
+                status=403
+            )
 
-        # ==========================================
-        # 3) TÉCNICO → solo si está asignado
-        # ==========================================
-        if is_tech:
-            if ticket.assigned_to != user:
-                return Response(
-                    {"detail": "No puedes modificar tickets que no te fueron asignados."},
-                    status=403
-                )
-            return super().partial_update(request, *args, **kwargs)
+        # =====================================================
+        # 3) ADMIN → acceso total
+        # =====================================================
+        response = super().partial_update(request, *args, **kwargs)
 
-        # ==========================================
-        # Otros casos → no autorizado
-        # ==========================================
-        return Response({"detail": "No autorizado."}, status=403)
+        # Recalcular SLA si cambió la prioridad
+        ticket.refresh_from_db()
 
+        if "priority" in request.data and ticket.priority_id != old_priority:
+            if ticket.priority:
+                ticket.resolve_due_at = compute_due_at(ticket.created_at, ticket.priority)
+                ticket.save(update_fields=["resolve_due_at"])
+
+        return response
 
     # ------------------------------------------------------
-    # ACTUALIZAR TICKET (para admin/técnico)
+    # PUT — actualización total con SLA actualizado
     # ------------------------------------------------------
-def perform_update(self, serializer):
-    instance = self.get_object()
-    user = self.request.user
+    def perform_update(self, serializer):
+        from tickets.services.sla import compute_due_at
 
-    is_admin = user.groups.filter(name="admin").exists()
-    is_tech = user.groups.filter(name="tecnico").exists()
-    is_owner = instance.requester == user
+        instance = self.get_object()
+        old_priority = instance.priority_id
 
-    data = self.request.data
+        instance = serializer.save()
 
-    # ==================================================
-    # 1) USUARIO SOLICITANTE → solo title / description
-    # ==================================================
-    if is_owner and not (is_admin or is_tech):
+        # SLA recalculado si cambió prioridad
+        if instance.priority_id != old_priority and instance.priority:
+            instance.resolve_due_at = compute_due_at(instance.created_at, instance.priority)
+            instance.save(update_fields=["resolve_due_at"])
 
-        allowed = {"title", "description"}
-
-        # Detectar intento de editar campos prohibidos
-        for field, value in data.items():
-            if value in ["", None, "null", [], {}]:
-                continue
-            if field not in allowed:
-                raise PermissionDenied(
-                    f"No puedes modificar el campo '{field}'."
-                )
-
-        # Guardar solo title/description
-        instance.title = data.get("title", instance.title)
-        instance.description = data.get("description", instance.description)
-        instance.save()
         return instance
 
-    # ==================================================
-    # 2) TÉCNICO → solo si está asignado
-    # ==================================================
-    if is_tech and instance.assigned_to != user:
-        raise PermissionDenied("No puedes modificar tickets que no te fueron asignados.")
-
-    # ==================================================
-    # 3) PRIORIDAD y CATEGORÍA (FK)
-    # ==================================================
-    validated = serializer.validated_data
-
-    if "priority" in validated:
-        instance.priority = validated["priority"]
-
-    if "category" in validated:
-        instance.category = validated["category"]
-
-    # ==================================================
-    # 4) Guardar actualización completa (admin / técnico)
-    # ==================================================
-    serializer.save()
 
 
     # ------------------------------------------------------
@@ -925,35 +886,50 @@ def ticket_new(request):
 
 
 
-
 @login_required
 def dashboard(request):
+    from tickets.services.sla import refresh_ticket_sla
+
     user = request.user
+
+    # --- Filtrar solo tickets últimos 30 días ---
+    limit_date = now() - timedelta(days=30)
 
     # --- Base queryset (visibilidad según rol)
     if user.groups.filter(name="admin").exists():
-        base_qs = Ticket.objects.todos()
+        base_qs = Ticket.objects.filter(created_at__gte=limit_date)
     elif user.groups.filter(name="tecnico").exists():
-        base_qs = Ticket.objects.filter(assigned_to=user)
+        base_qs = Ticket.objects.filter(
+            assigned_to=user,
+            created_at__gte=limit_date
+        )
     else:
-        base_qs = Ticket.objects.filter(requester=user)
+        base_qs = Ticket.objects.filter(
+            requester=user,
+            created_at__gte=limit_date
+        )
 
-    # --- Totales globales del usuario
+    # ======================================================
+    # 🔥 NUEVO: Recalcular SLA en todos los tickets visibles
+    # ======================================================
+    for t in base_qs:
+        refresh_ticket_sla(t)   # actualiza breach_risk en DB
+
+    # --- Totales globales
     total = base_qs.count()
     abiertos = base_qs.filter(state="open").count()
     en_progreso = base_qs.filter(state="in_progress").count()
     resueltos = base_qs.filter(state="resolved").count()
-    mios = Ticket.objects.filter(requester=user).count()
 
-    # --- Porcentajes para la barra de estado
-    if total:
-        pa = round(abiertos * 100 / total)
-        pp = round(en_progreso * 100 / total)
-        pr = round(resueltos * 100 / total)
-    else:
-        pa = pp = pr = 0
+    from tickets.services.sla import calculate_sla_status
 
-    # --- Top categorías (solo tickets visibles para el usuario)
+    sla_riesgo = 0
+    for t in base_qs:
+        if calculate_sla_status(t)["breach_risk"]:
+            sla_riesgo += 1
+
+
+    # --- Top categorías
     por_categoria = (
         base_qs.values("category__name")
         .annotate(c=Count("id"))
@@ -968,21 +944,27 @@ def dashboard(request):
         .order_by("-created_at")[:8]
     )
 
-    # --- Contexto final
-    ctx = {
+    # --- Porcentaje barra
+    if total > 0:
+        pa = round(abiertos * 100 / total)
+        pp = round(en_progreso * 100 / total)
+        pr = round(resueltos * 100 / total)
+    else:
+        pa = pp = pr = 0
+
+    return render(request, "tickets/dashboard.html", {
         "total": total,
         "abiertos": abiertos,
         "en_progreso": en_progreso,
         "resueltos": resueltos,
-        "mios": mios,
         "por_categoria": por_categoria,
         "recientes": recientes,
         "pa": pa,
         "pp": pp,
         "pr": pr,
-    }
+        "sla_riesgo": sla_riesgo,
+    })
 
-    return render(request, "tickets/dashboard.html", ctx)
 
 
 @login_required
@@ -2003,20 +1985,26 @@ def asset_ticket_history(request, asset_id: str):
 @login_required
 def metrics_page(request):
     User = get_user_model()
+    
     techs = (
         User.objects.filter(groups__name__in=["admin", "tecnico"])
         .distinct()
         .order_by("username")
     )
+
     categories = Category.objects.order_by("name")
+
+    # 🔥 PRIORIDADES DINÁMICAS (corrección)
+    priorities = Priority.objects.filter(is_active=True).order_by("sla_minutes")
 
     return render(
         request,
         "tickets/metrics.html",
         {
             "techs": techs,
-            "categories": categories
-        },
+            "categories": categories,
+            "priorities": priorities,   # ← ahora SÍ existe
+        }
     )
 
 
@@ -2328,10 +2316,12 @@ def metrics_summary(request):
     - priority  : prioridad (low/medium/high/critical...)
     """
     user = request.user
-    qs = Ticket.objects.todo()
+
+    # 🔥 CORRECTO: usar .todos() (tu manager custom)
+    qs = Ticket.objects.todos()
 
     # -----------------------------
-    # RBAC
+    # RBAC según rol
     # -----------------------------
     if user.groups.filter(name="admin").exists():
         pass
@@ -2341,15 +2331,17 @@ def metrics_summary(request):
         qs = qs.filter(requester=user)
 
     # -----------------------------
-    # Filtros básicos
+    # Filtros GET
     # -----------------------------
     from_date = request.GET.get("from")
     to_date = request.GET.get("to")
     category = request.GET.get("category")
     assignee = request.GET.get("assignee")
-    priority = request.GET.get("priority")
+    priority = request.GET.get("priority")  # texto: low, high, critical, etc.
 
-    # Rango de fechas
+    # -----------------------------
+    # Filtro por fecha
+    # -----------------------------
     try:
         if from_date:
             from_date = make_aware(datetime.strptime(from_date, "%Y-%m-%d"))
@@ -2358,39 +2350,47 @@ def metrics_summary(request):
         if to_date:
             to_date = make_aware(datetime.strptime(to_date, "%Y-%m-%d")) + timedelta(days=1)
             qs = qs.filter(created_at__lt=to_date)
-    except Exception:
-        pass
+    except:
+        pass  # no romper si la fecha está mala
 
+    # -----------------------------
+    # Categoría
+    # -----------------------------
     if category:
         qs = qs.filter(category_id=category)
 
+    # -----------------------------
+    # Asignado
+    # -----------------------------
     if assignee:
         qs = qs.filter(assigned_to_id=assignee)
 
     # -----------------------------
-    # ✔ Filtro de prioridad FIX
+    # 🔥 FIX DEFINITIVO DEL FILTRO DE PRIORIDAD
+    # Usa 'code' (critical, high, medium, low)
+    # y también acepta el nombre ("Crítica", "Alta", etc.)
     # -----------------------------
     if priority:
         from tickets.models import Priority
 
-        prio_obj = (
-            Priority.objects.filter(slug__iexact=priority).first() or
-            Priority.objects.filter(name__iexact=priority).first() or
-            Priority.objects.filter(code__iexact=priority).first()
-        )
+        prio_obj = Priority.objects.filter(code__iexact=priority).first()
+        if not prio_obj:
+            prio_obj = Priority.objects.filter(name__iexact=priority).first()
 
         if prio_obj:
             qs = qs.filter(priority_id=prio_obj.id)
         else:
-            # Si no existe la prioridad → devolvemos queryset vacío
+            # No existe la prioridad enviada → 0 resultados
             qs = qs.none()
 
     # -----------------------------
-    # Métricas
+    # Cálculo de métricas
     # -----------------------------
     service = TicketMetricsService(qs)
     summary = service.summarize()
+
     return Response(summary)
+
 
 @login_required
 def sistema_page(request):
