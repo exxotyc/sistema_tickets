@@ -333,30 +333,41 @@ def users_toggle_active(request):
     if not _actor_can_use_user_maint(request.user):
         return JsonResponse({"ok": False, "error": "No autorizado."}, status=403)
 
+    # Leer JSON
     try:
         data = json.loads(request.body.decode("utf-8"))
     except Exception:
-        return HttpResponseBadRequest("JSON inválido")
+        return JsonResponse({"ok": False, "error": "JSON inválido"}, status=400)
 
     uid = data.get("id")
-    active = bool(data.get("active", True))
+    if not uid:
+        return JsonResponse({"ok": False, "error": "ID requerido"}, status=400)
+
     user = get_object_or_404(User, pk=uid)
 
+    # No puedes borrarte a ti mismo
+    if request.user.id == user.id:
+        return JsonResponse({"ok": False, "error": "No puedes desactivarte a ti mismo."}, status=400)
+
+    # Verificar permisos RBAC
     try:
         assert_actor_can_manage(request.user, user, user_managed_roles(user))
     except (LastAdminRemovalError, RolePermissionError) as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=403)
 
-    if not active:
-        try:
-            assert_actor_can_manage(request.user, user, user_managed_roles(user))
-        except LastAdminRemovalError as e:
-            return JsonResponse({"ok": False, "error": str(e)}, status=409)
+    # ---------------------------------------------------------
+    # 🔥 TOGGLE REAL — invierte el estado actual
+    # ---------------------------------------------------------
+    new_state = not user.is_active
+    user.is_active = new_state
+    user.save(update_fields=["is_active"])
 
-    user.is_active = active
-    user.save()
+    return JsonResponse({
+        "ok": True,
+        "id": user.id,
+        "is_active": new_state
+    })
 
-    return JsonResponse({"ok": True, "id": user.id, "is_active": user.is_active})
 
 
 
